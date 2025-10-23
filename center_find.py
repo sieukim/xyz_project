@@ -4,8 +4,8 @@ from ultralytics import YOLO
 # =========================
 # 설정
 # =========================
-MODEL_PATH = "/home/deepet/Desktop/yellowsimpson/github/xyz_1st_project/yolov8n.pt"
-CAMERA_DEV = 0 #"/dev/video6"
+MODEL_PATH = "/home/deepet/Desktop/yellowsimpson/github/xyz_1st_project/runs/detect/train/weights/best.pt"
+CAMERA_DEV = "/dev/video8" #"/dev/video7"
 FRAME_WIDTH, FRAME_HEIGHT = 1280, 720
 CONFIDENCE_THRESHOLD = 0.7
 CENTER_TOLERANCE_PX = 10  # 프레임 중심 근접 판단용
