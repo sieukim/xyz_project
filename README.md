@@ -18,4 +18,4 @@ Subscriber터미널에서 카메라 신호 받는 명령어
 $ ros2 run camera_state_pubsub camera_state_subscriber
 
 yolo모델 yolo_viewer받아오는 명령어 (위랑 same)
-$ ros2 run camera_state_pubsub yolo_viewer --ros-args -p window:=false
+$ ros2 run camera_state_pubsub yolo_viewer --ros-args -p window:=true

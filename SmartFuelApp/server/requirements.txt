@@ -1,0 +1,6 @@
+fastapi>=0.95
+uvicorn[standard]>=0.22
+# NOTE: rclpy is not a pip package in standard ROS2 installs. If you run this
+# server on a ROS2 machine, rclpy will be available from the ROS2 environment.
+# Do NOT add rclpy to pip requirements; instead install ROS2 following
+# the official instructions for your OS.
