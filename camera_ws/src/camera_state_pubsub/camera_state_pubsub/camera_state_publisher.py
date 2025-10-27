@@ -1,6 +1,9 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from sensor_msgs.msg import Image
+from rclpy.qos import qos_profile_sensor_data
+from cv_bridge import CvBridge
 import cv2
 import time
 
@@ -17,6 +20,9 @@ class CameraStatePublisher(Node):
 
         # 퍼블리셔
         self.state_pub = self.create_publisher(String, 'camera_state', 10)
+        self.image_pub = self.create_publisher(Image, '/camera/image_raw', qos_profile_sensor_data)
+
+        self.bridge = CvBridge()
 
         self.cap = None
         self.window_name = self.get_parameter('window_name').get_parameter_value().string_value
@@ -70,7 +76,16 @@ class CameraStatePublisher(Node):
         if not ok:
             self.get_logger().warn('프레임 읽기 실패…')
             return
+        
+        # 1) OpenCV 창 표시(원하면 유지)
         cv2.imshow(self.window_name, frame)
+
+        # 2) ROS Image 퍼블리시
+        img_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        img_msg.header.frame_id = 'camera'
+        img_msg.header.stamp = self.get_clock().now().to_msg()
+        self.image_pub.publish(img_msg)
+
         # 'q'로 종료
         if cv2.waitKey(1) & 0xFF == ord('q'):
             self.get_logger().info('사용자 종료(q)')

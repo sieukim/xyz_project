@@ -2,11 +2,12 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
-from std_msgs.msg import Header
+from std_msgs.msg import String
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 import cv2
 from datetime import datetime
+
 
 CONFIDENCE_THRESHOLD = 0.7
 CENTER_TOLERANCE_PX = 10
@@ -90,7 +91,8 @@ def annotate_with_detection(frame, yolo_result):
 class YOLOViewer(Node):
     def __init__(self):
         super().__init__('yolo_viewer')
-        self.declare_parameter('model_path', '/home/deepet/Desktop/yellowsimpson/workspace/camera_ws/best.pt')
+        self.declare_parameter('model_path', '/home/shim/ws/camera_ws/best.pt')  
+                                            #/home/shim/github/yolo_dectect_traing/yolov8n.pt 
         self.declare_parameter('window', False)  # True면 OpenCV 창 표시
 
         self.bridge = CvBridge()
@@ -111,18 +113,33 @@ class YOLOViewer(Node):
         if self.show_window:
             cv2.namedWindow('YOLO Annotated', cv2.WINDOW_NORMAL)
 
+        self.pub_class = self.create_publisher(String, '/detected_object', 10)
+        self.get_logger().info('YOLOViewer: 객체 인식 결과를 /detected_object 로 퍼블리시합니다.')
+
     def cb(self, msg: Image):
         # ROS Image -> OpenCV BGR
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
         # YOLO 추론
-        results = self.model.predict(
-            source=frame, device='cpu', imgsz=640, conf=0.4, verbose=False
-        )
-
+        results = self.model.predict(source=frame, device='cpu', imgsz=640, conf=0.4, verbose=False)
         annotated, info = annotate_with_detection(frame, results[0])
 
-        # (선택) 화면 표시
+        boxes = getattr(results[0], "boxes", None)
+        if boxes is not None and len(boxes) > 0:
+            names = self.model.names  # {0:'green_car', 1:'yellow_car', 2:'orange_car', ...}
+            seen_classes = set()
+            for i in range(len(boxes)):
+                cls_id = int(boxes.cls[i].item()) if hasattr(boxes, "cls") else -1
+                name = names.get(cls_id, f'class_{cls_id}')
+                if name in {'green_car', 'yellow_car', 'orange_car'}:
+                    seen_classes.add(name)
+            if seen_classes:
+                msg_out = String()
+                msg_out.data = ','.join(seen_classes)
+                self.pub_class.publish(msg_out)
+                self.get_logger().info(f"🎯 인식됨: {msg_out.data}")
+
+        # 화면 표시
         if self.show_window:
             cv2.imshow('YOLO Annotated', annotated)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -131,7 +148,7 @@ class YOLOViewer(Node):
 
         # 주석 이미지를 퍼블리시해서 RViz에서 보게 하기
         anno_msg = self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8')
-        anno_msg.header = msg.header  # 원본 타임스탬프/프레임ID 유지
+        anno_msg.header = msg.header
         self.pub_anno.publish(anno_msg)
 
 def main():
