@@ -11,14 +11,15 @@ app = FastAPI(title="SmartFuel ROS2 Bridge")
 
 # 간단한 인메모리 상태 저장소 (프로토타입용)
 orders: Dict[str, Dict[str, Any]] = {}
-
+class FuelComplete(BaseModel):
+    order_id: str
+    status: str
 
 class StartRequest(BaseModel):
     orderId: str
     fuelType: str
     amount: int
     source: str = "mobile_app"
-
 
 def _simulate_progress(order_id: str):
     # 프로토타입: 0% -> 100% 까지 단계적으로 증가시키는 시뮬레이션
@@ -44,7 +45,6 @@ ros_thread: threading.Thread | None = None
 ros_running = threading.Event()
 use_rclpy = False
 
-
 def _ros_publisher_loop():
     global use_rclpy
     try:
@@ -52,26 +52,44 @@ def _ros_publisher_loop():
         from rclpy.node import Node
         from std_msgs.msg import String
 
+        class BridgeNode(Node):
+            def __init__(self):
+                super().__init__("smartfuel_bridge_node")
+                self.pub = self.create_publisher(String, "start_fuel", 10)
+                self.sub = self.create_subscription(
+                    String, "fuel_status", self.status_callback, 10
+                )
+
+            def status_callback(self, msg):
+                # /fuel_status 수신 시 서버 메모리 상태 업데이트
+                print(f"📡 Received status: {msg.data}")
+                for order in orders.values():
+                    if msg.data == "completed":
+                        order["status"] = "completed"
+                        order["progress"] = 100
+                    elif msg.data == "in_progress":
+                        order["status"] = "in_progress"
+                        order["progress"] = 50
+
         rclpy.init()
-        node = Node("smartfuel_persistent_bridge")
-        pub = node.create_publisher(String, "start_fuel", 10)
+        node = BridgeNode()
         use_rclpy = True
-        print("rclpy available - persistent ROS2 publisher started")
+        print("rclpy subscriber for /fuel_status started ✅")
 
-        # loop until stopped
+        # ✅ 여기 추가!
         while ros_running.is_set():
+            # 메시지 발행 큐 확인
             try:
-                payload = ros_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-
-            try:
+                payload = ros_queue.get_nowait()
                 msg = String()
                 msg.data = json.dumps(payload, ensure_ascii=False)
-                pub.publish(msg)
-                print(f"Published payload to /start_fuel via rclpy: {payload.get('orderId')}")
-            except Exception as e:
-                print(f"Failed to publish via rclpy: {e}")
+                node.pub.publish(msg)
+                print(f"📤 Published payload to /start_fuel: {payload.get('orderId')}")
+            except queue.Empty:
+                pass
+
+            # 상태 토픽 spin 처리
+            rclpy.spin_once(node, timeout_sec=0.5)
 
         # shutdown
         try:
@@ -79,7 +97,7 @@ def _ros_publisher_loop():
             rclpy.shutdown()
         except Exception:
             pass
-        print("rclpy publisher stopped")
+        
     except Exception as e:
         # rclpy unavailable - we'll fall back to CLI on each request
         use_rclpy = False
@@ -161,8 +179,7 @@ def background_start(order_id: str, payload: dict):
     # 실제 ROS2 노드가 별도의 상태 토픽을 publish한다면
     # 여기서 구독해서 상태를 업데이트하도록 구현하세요.
     # 우선 시뮬레이션으로 진행 상태를 업데이트합니다.
-    _simulate_progress(order_id)
-
+    # _simulate_progress(order_id)
 
 @app.post("/start_fuel")
 async def start_fuel(req: StartRequest, background_tasks: BackgroundTasks):
@@ -193,3 +210,19 @@ async def get_status(order_id: str):
     if order_id not in orders:
         raise HTTPException(status_code=404, detail="order not found")
     return orders[order_id]
+
+# ✅ 주유 완료 수신 엔드포인트
+@app.post("/fuel/complete")
+async def fuel_complete(data: FuelComplete):
+    # 1️⃣ 로봇이 완료 신호를 보냈을 때 로그 출력
+    print(f"✅ 주유 완료 수신: {data.order_id}, 상태: {data.status}")
+
+    # 2️⃣ Flutter 앱에 상태 업데이트가 필요하면 여기서 publish / DB 갱신
+    # 예시: order_status[data.order_id] = "done"
+    # 또는 WebSocket / Firebase / MQTT 등으로 실시간 알림 전송
+
+    # 3️⃣ 응답 반환
+    return JSONResponse(
+        content={"message": f"Order {data.order_id} completed successfully"},
+        status_code=200
+    )

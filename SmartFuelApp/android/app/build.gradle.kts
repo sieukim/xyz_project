@@ -31,6 +31,21 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = "upload"
+            keyPassword = "895140"
+            storePassword = "895140"
+            storeFile = file("../upload-keystore.jks")
+        }
+        getByName("debug") {
+            keyAlias = "upload"
+            keyPassword = "895140"
+            storePassword = "895140"
+            storeFile = file("../upload-keystore.jks")
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

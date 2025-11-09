@@ -9,7 +9,7 @@ class GoogleLoginService {
     // Android용 OAuth 2.0 클라이언트 ID를 설정해야 합니다.
     // Firebase Console에서 프로젝트를 생성하고 Google Sign-In을 구성한 후
     // google-services.json 파일을 android/app/ 디렉토리에 추가해야 합니다.
-    clientId: '705920863475-al935ukn40efqh57n22qq1gqo1f2pggq.apps.googleusercontent.com',
+    clientId: '705920863475-q9bn0svvrqe46vb6u7gs08cvjirivput.apps.googleusercontent.com',
     scopes: [
       'email',
       'profile',
