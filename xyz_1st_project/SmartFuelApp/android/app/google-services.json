@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "391007049815",
+    "project_id": "smartfuel-18ce6",
+    "storage_bucket": "smartfuel-18ce6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:391007049815:android:60075b2e578ff28fdcab12",
+        "android_client_info": {
+          "package_name": "com.example.first_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCmzZnEJ8olHrNUvSwhdnYtkrqPtEACOoA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

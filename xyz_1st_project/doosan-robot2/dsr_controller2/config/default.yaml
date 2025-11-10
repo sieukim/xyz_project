@@ -1,0 +1,16 @@
+
+dsr_control_node2:
+  ros__parameters:
+    name:    "dsr01"
+    rate:    100
+    standby: 5000
+    command: "request"
+    host:    "110.120.1.39"
+    port:    12345
+    mode:    "real"
+    model:   "e0509"
+    gripper: "none"
+    mobile:  "none"
+    rt_host: "192.168.137.50"
+    auto_servo_on: true        # 자동으로 모터 켜기
+    force_control: true        # 강제 제어 모드
