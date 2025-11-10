@@ -22,3 +22,7 @@ $ ros2 run camera_state_pubsub camera_state_subscriber
 
 yolo모델 yolo_viewer받아오는 명령어 (위랑 same)
 $ ros2 run camera_state_pubsub yolo_viewer --ros-args -p window:=true
+
+
+df_doosan =>  세미 프로젝트 하드코딩
+df_doosan2 => 1차 프로젝트 코드
