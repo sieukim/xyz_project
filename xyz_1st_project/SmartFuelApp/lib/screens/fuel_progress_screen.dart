@@ -3,9 +3,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:smart_fuel/widgets/realsense_view.dart';
+import 'package:smart_fuel/services/llm_service.dart';
 import 'package:smart_fuel/widgets/webcam_view.dart';
 
 class FuelProgressScreen extends StatefulWidget {
@@ -22,6 +24,10 @@ class FuelProgressScreen extends StatefulWidget {
 
 class _FuelProgressScreenState extends State<FuelProgressScreen> {
   final FlutterTts _flutterTts = FlutterTts();
+  final SpeechToText _speechToText = SpeechToText();
+  bool _isListening = false;
+  String _voiceCommandStatusText = '주유 중 궁금한 점을 말씀해주세요.';
+
   Timer? _timer;
   String _status = '대기 중';
   int _progress = 0;
@@ -35,6 +41,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
   void initState() {
     super.initState();
     _initTtsAndSpeak();
+    _initStt();
     _extractIpAndStartPolling();
   }
 
@@ -42,6 +49,100 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
     await _flutterTts.setLanguage('ko-KR');
     await _flutterTts.setSpeechRate(1.0);
     await _flutterTts.speak("주유중입니다.");
+  }
+
+  Future<void> _initStt() async {
+    await _speechToText.initialize();
+  }
+
+  void _toggleListening() {
+    if (!_speechToText.isAvailable || _completed) return;
+    if (_isListening) {
+      _speechToText.stop();
+      setState(() => _isListening = false);
+    } else {
+      setState(() {
+        _isListening = true;
+        _voiceCommandStatusText = '듣는 중...';
+      });
+      _speechToText.listen(
+        onResult: (result) {
+          if (result.finalResult) {
+            _processVoiceCommand(result.recognizedWords);
+          }
+        },
+        localeId: 'ko_KR',
+        listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
+      );
+    }
+  }
+
+  Future<void> _processVoiceCommand(String command) async {
+    if (command.isEmpty) return;
+
+    setState(() {
+      _voiceCommandStatusText = '분석 중...';
+    });
+
+    final prompt = """
+    사용자의 질문 의도를 다음 중 하나로 분류하고 JSON 형식으로 반환해줘.
+    사용 가능한 의도: 'progress_query', 'time_query', 'hungry_query', 'wipe_query', 'thirsty_query', 'etc'.
+
+    - 'progress_query': 주유 진행률(%)을 묻는 질문. (예: "얼마나 됐어?", "진행률 알려줘")
+    - 'time_query': 남은 시간을 묻는 질문. (예: "몇 초 남았어?", "언제 끝나?")
+    - 'hungry_query': 배고픔과 관련된 표현. (예: "배고파", "출출한데", "뭐 먹을 거 없어?")
+    - 'wipe_query': 무언가 닦을 것이 필요하다는 표현. (예: "뭐 닦아야 하는데", "휴지 좀")
+    - 'thirsty_query': 목마름과 관련된 표현. (예: "목말라", "마실 것 좀 줘")
+    - 'etc': 위 분류에 해당하지 않는 모든 경우.
+
+    결과 예시: {"intent": "time_query"}
+
+    사용자 질문: "$command"
+    """;
+
+    try {
+      final result = await LlmService.generateContent(prompt);
+      final intent = result['intent'] as String? ?? 'etc';
+      String responseText = '';
+
+      switch (intent) {
+        case 'progress_query':
+          final remainingPercent = 100 - _progress;
+          responseText = "현재 $_progress% 완료, 약 $remainingPercent% 남았습니다.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'time_query':
+          const totalDuration = 20.0; // 총 주유 시간 (초)
+          final remainingSeconds = (totalDuration * (100 - _progress) / 100).round();
+          responseText = "약 $remainingSeconds초 남았습니다.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'hungry_query':
+          responseText = "간식을 가져다드리겠습니다. (약 30초 소요)";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'wipe_query':
+          responseText = "휴지를 가져다드리겠습니다. (약 10초 소요)";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'thirsty_query':
+          responseText = "물을 가져다드리겠습니다. (약 20초 소요)";
+          await _flutterTts.speak(responseText);
+          break;
+        default:
+          responseText = '요청을 이해하지 못했어요. 다시 말씀해주세요.';
+          await _flutterTts.speak(responseText);
+          break;
+      }
+
+      if (mounted) {
+        setState(() {
+          _voiceCommandStatusText = responseText;
+        });
+      }
+    } catch (e) {
+      debugPrint('LLM 의도 분석 오류: $e');
+    }
   }
 
   void _extractIpAndStartPolling() {
@@ -218,7 +319,32 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
                 ],
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 24),
+            if (!_completed)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: lightGrayBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(_isListening ? Icons.mic_off : Icons.mic, color: darkGrayText),
+                      onPressed: _toggleListening,
+                      tooltip: '궁금한 점을 질문하세요',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _voiceCommandStatusText,
+                        style: const TextStyle(fontSize: 16, color: lightGrayText),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_completed) const Spacer(),
           ],
         ),
       ),

@@ -421,7 +421,7 @@ class FuelTaskManager(Node):
         #--------------------- 직접 주유 작업 시작 ---------------------#
         # 주유 작업 반복 수행
         # self.run_fuel_task(m_count)
-        wait(4.0)
+        wait(20.0)
         
         # (car)주유구에서 주유건 빼기
         movel(posx(0, 75, 65, 0, 0, 0), v=g_vel_move, a=g_vel_move, mod=DR_MV_MOD_REL)

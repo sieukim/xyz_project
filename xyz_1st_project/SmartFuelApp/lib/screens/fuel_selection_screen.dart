@@ -2,10 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import 'package:string_similarity/string_similarity.dart';
 import '../services/kakao_login_service.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../services/google_login_service.dart';
+import '../services/llm_service.dart';
 import 'payment_screen.dart';
 import 'login_screen.dart';
 import '../widgets/profile_view.dart';
@@ -111,67 +111,60 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     }
   }
 
-  void _processVoiceCommand(String command) {
+  /// LLM을 사용하여 음성 명령을 분석하고 상태를 업데이트합니다.
+  Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
-
-    final fuelKeywords = ['휘발유', '경유', '전기'];
-    // Add a map for synonyms
-    final fuelSynonyms = {
-      '정유': '경유',
-      '기름': '휘발유',
-    };
-
-    String? foundFuelType;
-    String correctedCommand = command;
-
-    // 음성 인식된 문장을 단어 단위로 분리하여 각 단어의 유사도 검사
-    final words = command.split(' ');
-    for (final word in words) {
-      // Check synonyms first
-      if (fuelSynonyms.containsKey(word)) {
-        foundFuelType = fuelSynonyms[word];
-        correctedCommand = correctedCommand.replaceAll(word, foundFuelType!);
-        break;
-      }
-
-      final matches = StringSimilarity.findBestMatch(word, fuelKeywords);
-      // 유사도 점수가 0.5 이상일 때만 유효한 키워드로 간주 (오인식 방지)
-      if (matches.bestMatch.rating != null && matches.bestMatch.rating! > 0.5) {
-        foundFuelType = matches.bestMatch.target;
-        break; // 정확한 유종을 찾았으면 반복 중단
-      }
-    }
-
     setState(() {
-      _recognizedWords = correctedCommand;
+      _recognizedWords = '분석 중...';
+    });
 
-      // 유사도가 높은 유종 키워드를 찾았으면 상태 업데이트
-      if (foundFuelType != null) {
-        fuelType = foundFuelType;
-      }
+    try {
+      final prompt = """
+    사용자의 주유 요청에서 유종과 금액을 추출해줘.
+    - 유종은 '휘발유', '경유', '전기' 중 하나여야 해.
+    - 금액은 만원 단위 숫자(예: 10000, 50000)로 변환해줘.
+    - '가득'이라는 표현은 금액을 -1로 설정해줘.
+    - 결과는 반드시 JSON 형식으로 반환해줘. 예: {"fuelType": "휘발유", "amount": 50000}
+    - 만약 유종이나 금액을 알 수 없다면 null로 설정해줘.
 
-      // 금액 파싱 로직 (기존과 동일)
-      if (command.contains('가득')) {
-        amount = maxAmount;
-        selectedPreset = maxAmount;
-      } else {
-        final RegExp numRegExp = RegExp(r'(\d+)');
-        final match = numRegExp.firstMatch(command);
-        if (match != null) {
-          final numberString = match.group(1)!;
-          int parsedAmount = int.tryParse(numberString) ?? 0;
-          if (command.contains('만')) {
-            parsedAmount *= 10000;
-          }
+    사용자 요청: "$command"
+    """;
+      final result = await LlmService.generateContent(prompt);
 
-          if (_presets.contains(parsedAmount)) {
-            amount = parsedAmount;
-            selectedPreset = parsedAmount;
+      setState(() {
+        // LLM 응답에서 유종 정보 추출 및 업데이트
+        final extractedFuelType = result['fuelType'] as String?;
+        if (extractedFuelType != null && ['휘발유', '경유', '전기'].contains(extractedFuelType)) {
+          fuelType = extractedFuelType;
+        }
+
+        // LLM 응답에서 금액 정보 추출 및 업데이트, 화면 표시용 변수 준비
+        String amountForDisplay = '';
+        final extractedAmount = result['amount'] as int?;
+        if (extractedAmount != null) {
+          if (extractedAmount == -1) { // '가득'을 -1로 처리하기로 약속
+            amount = maxAmount;
+            selectedPreset = maxAmount;
+            amountForDisplay = '가득';
+          } else if (_presets.contains(extractedAmount)) {
+            amount = extractedAmount;
+            selectedPreset = extractedAmount;
+            amountForDisplay = '${_formatCurrency(extractedAmount)}원';
           }
         }
-      }
-    });
+
+        // LLM이 수정한 내용을 바탕으로 화면에 표시할 텍스트를 새로 조합
+        final correctedFuel = extractedFuelType ?? fuelType;
+        _recognizedWords = '$correctedFuel $amountForDisplay'.trim();
+      });
+    } catch (e) {
+      debugPrint('LLM 처리 오류: $e');
+      setState(() {
+        _recognizedWords = '오류가 발생했습니다. 다시 시도해주세요.';
+      });
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
