@@ -85,22 +85,23 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
     });
 
     final prompt = """
-    사용자의 질문 의도를 다음 중 하나로 분류하고 JSON 형식으로 반환해줘.
-    사용 가능한 의도: 'progress_query', 'time_query', 'hungry_query', 'wipe_query', 'thirsty_query', 'etc'.
+        사용자의 질문 의도를 다음 중 하나로 분류하고 JSON 형식으로 반환해줘.
+        사용 가능한 의도: 'progress_query', 'time_query', 'hungry_query', 'wipe_query', 'thirsty_query', 'news_query', 'weather_query', 'joke_query', 'music_query', 'book_query', 'movie_query', 'restaurant_query', 'travel_query', 'health_query', 'tech_query', 'finance_query', 'etc'.
+    
+        - 'progress_query': 주유 진행률(%)을 묻는 질문. (예: "얼마나 됐어?", "진행률 알려줘")
+        - 'time_query': 남은 시간을 묻는 질문. (예: "몇 초 남았어?", "언제 끝나?")
+        - 'hungry_query': 배고픔과 관련된 표현. (예: "배고파", "출출한데", "뭐 먹을 거 없어?")
+        - 'wipe_query': 무언가 닦을 것이 필요하다는 표현. (예: "뭐 닦아야 하는데", "휴지 좀")
+        - 'thirsty_query': 목마름과 관련된 표현. (예: "목말라", "마실 것 좀 줘")
+        - 'news_query', 'weather_query', 'joke_query', 'music_query', 'book_query', 'movie_query', 'restaurant_query', 'travel_query', 'health_query', 'tech_query', 'finance_query': 일반적인 정보성 질문.
+        - 'etc': 위 분류에 해당하지 않는 모든 경우.
+    
+        결과 예시: {"intent": "time_query"}
+    
+        사용자 질문: "$command"
+        """;
 
-    - 'progress_query': 주유 진행률(%)을 묻는 질문. (예: "얼마나 됐어?", "진행률 알려줘")
-    - 'time_query': 남은 시간을 묻는 질문. (예: "몇 초 남았어?", "언제 끝나?")
-    - 'hungry_query': 배고픔과 관련된 표현. (예: "배고파", "출출한데", "뭐 먹을 거 없어?")
-    - 'wipe_query': 무언가 닦을 것이 필요하다는 표현. (예: "뭐 닦아야 하는데", "휴지 좀")
-    - 'thirsty_query': 목마름과 관련된 표현. (예: "목말라", "마실 것 좀 줘")
-    - 'etc': 위 분류에 해당하지 않는 모든 경우.
-
-    결과 예시: {"intent": "time_query"}
-
-    사용자 질문: "$command"
-    """;
-
-    try {
+ try {
       final result = await LlmService.generateContent(prompt);
       final intent = result['intent'] as String? ?? 'etc';
       String responseText = '';
@@ -127,6 +128,44 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
           break;
         case 'thirsty_query':
           responseText = "물을 가져다드리겠습니다. (약 20초 소요)";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'news_query':
+          responseText = "최신 뉴스를 검색해볼게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'weather_query':
+          responseText = "현재 위치의 날씨 정보를 알려드릴게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'joke_query':
+          responseText = "세상에서 가장 뜨거운 과일이 뭔지 아세요? 바로 천도복숭아입니다.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'music_query':
+          responseText = "들으실 만한 음악을 추천해 드릴게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'book_query':
+          responseText = "읽을 만한 책을 찾아볼게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'movie_query':
+          responseText = "요즘 볼만한 영화를 추천해 드릴게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'restaurant_query':
+          responseText = "주변 맛집을 검색해 드릴게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'travel_query':
+          responseText = "가실 만한 여행지를 추천해 드릴게요.";
+          await _flutterTts.speak(responseText);
+          break;
+        case 'health_query':
+        case 'tech_query':
+        case 'finance_query':
+          responseText = "요청하신 분야의 정보를 찾아볼게요.";
           await _flutterTts.speak(responseText);
           break;
         default:

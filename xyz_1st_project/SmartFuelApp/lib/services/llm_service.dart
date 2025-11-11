@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 class LlmService {
   // ⚠️ 실제 앱에서는 API 키를 .env 파일 등으로 안전하게 관리해야 합니다.
-  static const String _apiKey = 'AIzaSyBbqc2ZFo_1n8Un8vX7509u0au44SanMC8';
+  static const String _apiKey = '';
   static const String _modelEndpoint =
       'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$_apiKey';
 
@@ -19,7 +19,9 @@ class LlmService {
       url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'contents': [{'parts': [{'text': prompt}]}]
+        'contents': [
+          {'parts': [{'text': prompt}]}
+        ]
       }),
     );
 
@@ -36,7 +38,9 @@ class LlmService {
     }
 
     final content = responseBody['candidates'][0]['content']['parts'][0]['text'] as String;
-    final jsonResult = jsonDecode(content.replaceAll('```json', '').replaceAll('```', '').trim());
+    // LLM 응답에서 마크다운 코드 블록 제거 후 JSON 파싱
+    final cleanedContent = content.replaceAll('```json', '').replaceAll('```', '').trim();
+    final jsonResult = jsonDecode(cleanedContent);
     return jsonResult as Map<String, dynamic>;
   }
 }
