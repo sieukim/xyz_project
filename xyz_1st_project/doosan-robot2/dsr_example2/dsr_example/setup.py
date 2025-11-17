@@ -36,6 +36,8 @@ setup(
                 'test_listener_node = dsr_example.test_listener_node:main',
                 'realsense_streamer = dsr_example.realsense_streamer:main',
                 'webcam_streamer = dsr_example.webcam_streamer:main',
+                'ocr_manager_ros = dsr_example.ocr_manager_ros:main',
+                'ocr_streamer = dsr_example.ocr_streamer:main',
             ],
         },
     

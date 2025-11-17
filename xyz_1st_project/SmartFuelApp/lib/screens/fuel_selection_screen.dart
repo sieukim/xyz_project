@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart';
 import '../services/kakao_login_service.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
@@ -23,6 +25,11 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
   String _recognizedWords = '';
+  
+  String _carNumber = ''; // 상태 변수로 변경
+  // OCR HTTP 폴링 관련 변수
+  String _ocrText = '차량 번호 인식 대기 중...';
+  Timer? _ocrPollingTimer;
 
   AnimationController? _animationController;
 
@@ -40,9 +47,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       vsync: this,
       duration: const Duration(seconds: 5),
     );
-    _initTts();
-    _initStt();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _speakIntro());
+    // 비동기 초기화 로직을 별도 함수로 분리하여 호출합니다.
+    _initialize();
+    _startOcrPolling();
   }
 
   @override
@@ -50,12 +57,52 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     _flutterTts.stop();
     _speechToText.cancel();
     _animationController?.dispose();
+    _ocrPollingTimer?.cancel();
     super.dispose();
+  }
+
+  /// 화면에 필요한 비동기 서비스들을 초기화합니다.
+  Future<void> _initialize() async {
+    await _initTts();
+    await _initStt();
+    // 모든 초기화가 끝난 후, 위젯이 화면에 완전히 그려진 다음 음성 안내를 시작합니다.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _speakIntro());
+  }
+
+  /// OCR 텍스트를 주기적으로 가져오기 시작합니다.
+  void _startOcrPolling() {
+    // ❗️ ROS PC의 IP 주소로 변경해주세요.
+    const rosIpAddress = '192.168.50.211'; 
+    final url = Uri.parse('http://$rosIpAddress:8083/ocr_text');
+
+    _ocrPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      try {
+        final response = await http.get(url).timeout(const Duration(seconds: 2));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final newText = data['ocr_text'] as String?;
+          if (newText != null && newText.isNotEmpty && newText != _ocrText) {
+            setState(() {
+              _ocrText = newText;
+              _carNumber = newText; // 원본 숫자만 저장
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('OCR Polling Error: $e');
+        // 네트워크 오류 발생 시 사용자에게 상태를 알립니다.
+        setState(() {
+          _ocrText = '차량 번호 서버 연결 실패';
+        });
+      }
+    });
   }
 
   Future<void> _initTts() async {
     await _flutterTts.setLanguage('ko-KR');
     await _flutterTts.setSpeechRate(1.0);
+    // speak 함수가 음성 출력을 완료할 때까지 기다리도록 설정합니다.
+    await _flutterTts.awaitSpeakCompletion(true);
   }
 
   Future<void> _initStt() async {
@@ -81,7 +128,15 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   }
 
   Future<void> _speakIntro() async {
-    await _flutterTts.speak('안녕하세요, 유종과 금액을 말씀해주세요.');
+    // 숫자와 문자를 분리하여 순차적으로 발화
+    // 숫자를 말하는 동안만 발음 속도를 높입니다.
+    await _flutterTts.setSpeechRate(1.5);
+    for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
+      await _flutterTts.speak(num);
+    }
+    // 원래 속도로 복원하여 다음 문장을 말합니다.
+    await _flutterTts.setSpeechRate(1.0);
+    await _flutterTts.speak('고객님, 안녕하세요, 유종과 금액을 말씀해주세요.');
   }
 
   void _startListening() {
@@ -343,6 +398,11 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // --- 차량 번호 인식 섹션 ---
+            _buildSectionTitle('차량 번호', darkGrayText),
+            _buildOcrResultCard(lightGray, darkGrayText),
+            const SizedBox(height: 32),
+
             // --- 음성 인식 섹션 ---
             _buildSectionTitle('음성 인식', darkGrayText),
             _buildVoiceCommandCard(lightGray, darkGrayText),
@@ -367,12 +427,22 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           onPressed: selectedPreset == null
               ? null
               : () async {
+                  // 결제할 유종과 금액을 음성으로 안내합니다.
                   final String speakAmount =
-                      amount == maxAmount ? '가득' : '${_formatCurrency(amount)}원';
-                  await _flutterTts.speak('$fuelType $speakAmount 결제하겠습니다.');
+                      amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
+                  
+                  // for 루프를 사용하여 차량 번호를 한 글자씩 발음합니다.
+                  // 숫자를 말하는 동안만 발음 속도를 높입니다.
+                  await _flutterTts.setSpeechRate(1.5);
+                  for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
+                    await _flutterTts.speak(num);
+                  }
+                  // 원래 속도로 복원하여 다음 문장을 말합니다.
+                  await _flutterTts.setSpeechRate(1.0);
+                  await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
 
                   if (!mounted) return;
-
+                  
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -411,6 +481,28 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
+  // OCR 결과 표시 위젯
+  Widget _buildOcrResultCard(Color bgColor, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.directions_car, color: textColor),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              _ocrText,
+              style: TextStyle(fontSize: 18, color: textColor, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   // 음성 인식 카드 위젯
   Widget _buildVoiceCommandCard(Color bgColor, Color textColor) {
     return Container(
