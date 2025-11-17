@@ -7,6 +7,8 @@ from ultralytics import YOLO
 
 import rclpy
 from rclpy.node import Node
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 from std_msgs.msg import String
 
 
@@ -16,7 +18,6 @@ class YoloOcrNode(Node):
 
         # ===== ROS2 파라미터 =====
         self.declare_parameter("model_path", "/home/sieun/Downloads/xyz_project/xyz_1st_project/doosan-robot2/dsr_example2/dsr_example/dsr_example/weights/Vehicle_number.pt")
-        self.declare_parameter("camera_device", "/dev/video2")       # 또는 0
         self.declare_parameter("capture_interval_sec", 5.0)
         self.declare_parameter("lock_duration_sec", 5.0)
         self.declare_parameter("plate_class_id", -1)                  # -1이면 필터 안 함
@@ -25,7 +26,6 @@ class YoloOcrNode(Node):
         self.declare_parameter("conf_thres", 0.0)                     # 필요시 사용
 
         self.model_path = self.get_parameter("model_path").get_parameter_value().string_value
-        self.camera_device = self.get_parameter("camera_device").get_parameter_value().string_value
         self.CAPTURE_INTERVAL = float(self.get_parameter("capture_interval_sec").value)
         self.LOCK_DURATION = float(self.get_parameter("lock_duration_sec").value)
         self.PLATE_CLASS_ID = int(self.get_parameter("plate_class_id").value)
@@ -40,12 +40,10 @@ class YoloOcrNode(Node):
         self.model = YOLO(self.model_path)
         self.get_logger().info(f"YOLO model loaded: {self.model_path}")
 
-        # ===== 카메라 =====
-        self.cap = cv2.VideoCapture(self.camera_device)
-        if not self.cap.isOpened():
-            self.get_logger().error(f"Cannot open camera: {self.camera_device}")
-        else:
-            self.get_logger().info(f"Camera opened: {self.camera_device}")
+        # ===== ROS2 구독 및 CvBridge =====
+        self.bridge = CvBridge()
+        self.subscription = self.create_subscription(Image, '/fuel/webcam_color', self.image_callback, 10)
+        self.get_logger().info("Subscribing to /fuel/webcam_color topic for OCR.")
 
         # ===== 상태 변수 =====
         self.active_bbox = None       # (x1,y1,x2,y2)
@@ -53,9 +51,6 @@ class YoloOcrNode(Node):
         self.last_capture_time = 0.0
         self.plate_text = ""
         os.makedirs("plates", exist_ok=True)
-
-        # 메인 루프용 타이머 (프레임 레이트 제어: 30Hz 정도)
-        self.timer = self.create_timer(1.0 / 30.0, self.loop)
 
     # ---------- 전처리 / OCR ----------
     def preprocess_ocr_roi(self, img):
@@ -102,10 +97,12 @@ class YoloOcrNode(Node):
         return best_box
 
     # ---------- 메인 루프 ----------
-    def loop(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.get_logger().warn("Failed to read frame")
+    def image_callback(self, msg: Image):
+        """/fuel/webcam_color 토픽을 수신할 때마다 호출되는 콜백 함수"""
+        try:
+            frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except Exception as e:
+            self.get_logger().error(f"Failed to convert image: {e}")
             return
 
         now = time.time()
@@ -167,18 +164,9 @@ class YoloOcrNode(Node):
         cv2.putText(frame, f"Lock: {remain_lock}s | Next capture in: {remain_capture}s",
                     (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-        cv2.imshow("YOLO + OCR (every 5s, ROS2)", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            rclpy.shutdown()
-
     # 종료
     def destroy_node(self):
-        try:
-            if self.cap:
-                self.cap.release()
-            cv2.destroyAllWindows()
-        finally:
-            super().destroy_node()
+        super().destroy_node()
 
 
 def main():
