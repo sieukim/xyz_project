@@ -108,23 +108,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
   Future<void> _initStt() async {
     await _speechToText.initialize(
-      onError: (error) => debugPrint('STT Error: $error'),
-      onStatus: (status) {
-        if (mounted) {
-          final isListening = _speechToText.isListening;
-          if (_isListening != isListening) {
-            setState(() {
-              _isListening = isListening;
-              if (_isListening) {
-                _recognizedWords = '듣는 중...';
-                _animationController?.reverse(from: 1.0);
-              } else {
-                _animationController?.stop();
-              }
-            });
-          }
-        }
-      },
+      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
     );
   }
 
@@ -141,7 +125,13 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   }
 
   void _startListening() {
-    if (!_speechToText.isAvailable || _isListening) return;
+    if (!_speechToText.isAvailable) return;
+    
+    setState(() {
+      _isListening = true;
+      _recognizedWords = '듣는 중...';
+    });
+
     _speechToText.listen(
       onResult: (result) {
         if (result.finalResult) {
@@ -154,9 +144,13 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   }
 
   void _stopListening() {
-    if (!_isListening) return;
     _speechToText.stop();
-    setState(() {});
+    if (!mounted) return;
+    
+    setState(() {
+      _isListening = false;
+      _recognizedWords = '';
+    });
   }
 
   void _toggleListening() {
@@ -170,8 +164,10 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   /// LLM을 사용하여 음성 명령을 분석하고 상태를 업데이트합니다.
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
+    // 상태 변경을 하나로 통합: '분석 중'으로 바꾸고, isListening은 false로 설정
     setState(() {
       _recognizedWords = '분석 중...';
+      _isListening = false;
     });
 
     try {
@@ -220,6 +216,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       });
     }
   }
+
+  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
+  bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
 
 
   @override
@@ -425,7 +424,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: ElevatedButton(
-          // _isSpeaking이 true이거나 selectedPreset이 null이면 버튼 비활성화
+          // TTS가 동작 중이거나, 선택된 금액이 없으면 비활성화
           onPressed: (selectedPreset == null || _isSpeaking)
               ? null
               : () async {
@@ -481,8 +480,8 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
             elevation: 0,
           ),
           child: Text(
-            '${_formatCurrency(amount)}원 결제하기',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: white),
+            '결제하기',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
         ),
       ),
@@ -530,8 +529,11 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       child: Row(
         children: [
           IconButton(
-            icon: Icon(_isListening ? Icons.mic_off : Icons.mic, color: textColor),
-            onPressed: _toggleListening,
+            icon: Icon(
+              _isVoiceProcessing ? Icons.mic_off : Icons.mic,
+              color: _isVoiceProcessing ? Colors.grey : textColor,
+            ),
+            onPressed: _isVoiceProcessing ? null : _toggleListening,
             tooltip: '음성으로 주문',
           ),
           const SizedBox(width: 8),
@@ -562,7 +564,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
         return Expanded(
           child: GestureDetector(
-            onTap: () => setState(() => fuelType = type),
+            onTap: _isVoiceProcessing ? null : () => setState(() => fuelType = type),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -603,12 +605,14 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         final label = preset == maxAmount ? '가득' : '${preset ~/ 10000}만원';
 
         return GestureDetector(
-          onTap: () {
-            setState(() {
-              selectedPreset = preset;
-              amount = preset;
-            });
-          },
+          onTap: _isVoiceProcessing
+              ? null
+              : () {
+                  setState(() {
+                    selectedPreset = preset;
+                    amount = preset;
+                  });
+                },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(

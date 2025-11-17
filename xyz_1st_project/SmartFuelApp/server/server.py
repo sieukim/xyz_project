@@ -32,10 +32,11 @@ class StartRequest(BaseModel):
 def _simulate_progress(order_id: str):
     # 프로토타입: 0% -> 100% 까지 단계적으로 증가시키는 시뮬레이션
     orders[order_id]["status"] = "in_progress"
-    for p in range(0, 101, 5):  # 10단계 -> 20단계로 변경
+    # 60초 동안 20단계로 나누어 진행 (3초에 5%씩 증가)
+    for p in range(0, 101, 5):
         orders[order_id]["progress"] = p
         # 실제 구현에서는 ROS2의 상태 토픽을 구독하여 진행도를 업데이트해야 합니다.
-        time.sleep(1)  # 1초씩 20번 = 총 20초
+        time.sleep(3)  # 3초 * 20번 = 총 60초
     orders[order_id]["status"] = "completed"
     orders[order_id]["progress"] = 100
 

@@ -22,24 +22,30 @@ class FuelProgressScreen extends StatefulWidget {
   State<FuelProgressScreen> createState() => _FuelProgressScreenState();
 }
 
-class _FuelProgressScreenState extends State<FuelProgressScreen> {
+class _FuelProgressScreenState extends State<FuelProgressScreen>
+    with SingleTickerProviderStateMixin {
   final FlutterTts _flutterTts = FlutterTts();
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
   String _voiceCommandStatusText = '주유 중 궁금한 점을 말씀해주세요.';
+  bool _isSpeaking = false;
 
   Timer? _timer;
   String _status = '대기 중';
   int _progress = 0;
   bool _completed = false;
   int _countdown = 5;
+  bool _isFinishingSoon = false; // 주유 완료 임박 상태
   Timer? _countdownTimer;
 
+  TabController? _tabController;
   String? _serverIp;
 
   @override
   void initState() {
     super.initState();
+    // 탭 컨트롤러 초기화
+    _tabController = TabController(length: 2, vsync: this);
     _initTtsAndSpeak();
     _initStt();
     _extractIpAndStartPolling();
@@ -48,33 +54,57 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
   Future<void> _initTtsAndSpeak() async {
     await _flutterTts.setLanguage('ko-KR');
     await _flutterTts.setSpeechRate(1.0);
+    // speak 함수가 즉시 반환되도록 awaitSpeakCompletion 설정을 false로 변경합니다.
+    await _flutterTts.awaitSpeakCompletion(false);
+
+    // 음성 출력 시작/종료 시 _isSpeaking 상태를 업데이트하여 UI를 제어합니다.
+    _flutterTts.setStartHandler(() {
+      if (mounted) setState(() => _isSpeaking = true);
+    });
+    _flutterTts.setCompletionHandler(() {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+    _flutterTts.setErrorHandler((msg) {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
     await _flutterTts.speak("주유중입니다.");
   }
 
   Future<void> _initStt() async {
-    await _speechToText.initialize();
+    await _speechToText.initialize(
+      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
+    );
   }
 
   void _toggleListening() {
-    if (!_speechToText.isAvailable || _completed) return;
+    if (!_speechToText.isAvailable || _completed || _isFinishingSoon) return;
     if (_isListening) {
-      _speechToText.stop();
-      setState(() => _isListening = false);
+      _stopListening();
     } else {
-      setState(() {
-        _isListening = true;
-        _voiceCommandStatusText = '듣는 중...';
-      });
-      _speechToText.listen(
-        onResult: (result) {
-          if (result.finalResult) {
-            _processVoiceCommand(result.recognizedWords);
-          }
-        },
-        localeId: 'ko_KR',
-        listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
-      );
+      _startListening();
     }
+  }
+
+  void _startListening() {
+    if (!_speechToText.isAvailable) return;
+    setState(() {
+      _isListening = true;
+      _voiceCommandStatusText = '듣는 중...';
+    });
+    _speechToText.listen(
+      onResult: (result) {
+        if (result.finalResult) {
+          _processVoiceCommand(result.recognizedWords);
+        }
+      },
+      localeId: 'ko_KR',
+      listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
+    );
+  }
+
+  void _stopListening() {
+    _speechToText.stop();
+    if (mounted) setState(() => _isListening = false);
   }
 
   Future<void> _processVoiceCommand(String command) async {
@@ -82,6 +112,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
 
     setState(() {
       _voiceCommandStatusText = '분석 중...';
+      _isListening = false;
     });
 
     final prompt = """
@@ -104,85 +135,72 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
  try {
       final result = await LlmService.generateContent(prompt);
       final intent = result['intent'] as String? ?? 'etc';
-      String responseText = '';
+      String responseText;
 
       switch (intent) {
         case 'progress_query':
           final remainingPercent = 100 - _progress;
           responseText = "현재 $_progress% 완료, 약 $remainingPercent% 남았습니다.";
-          await _flutterTts.speak(responseText);
           break;
         case 'time_query':
-          const totalDuration = 20.0; // 총 주유 시간 (초)
+          const totalDuration = 60.0; // 총 주유 시간 (초)
           final remainingSeconds = (totalDuration * (100 - _progress) / 100).round();
           responseText = "약 $remainingSeconds초 남았습니다.";
-          await _flutterTts.speak(responseText);
           break;
         case 'hungry_query':
           responseText = "간식을 가져다드리겠습니다. (약 30초 소요)";
-          await _flutterTts.speak(responseText);
           break;
         case 'wipe_query':
           responseText = "휴지를 가져다드리겠습니다. (약 10초 소요)";
-          await _flutterTts.speak(responseText);
           break;
         case 'thirsty_query':
           responseText = "물을 가져다드리겠습니다. (약 20초 소요)";
-          await _flutterTts.speak(responseText);
           break;
         case 'news_query':
-          responseText = "최신 뉴스를 검색해볼게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'weather_query':
-          responseText = "현재 위치의 날씨 정보를 알려드릴게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'joke_query':
-          responseText = "세상에서 가장 뜨거운 과일이 뭔지 아세요? 바로 천도복숭아입니다.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'music_query':
-          responseText = "들으실 만한 음악을 추천해 드릴게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'book_query':
-          responseText = "읽을 만한 책을 찾아볼게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'movie_query':
-          responseText = "요즘 볼만한 영화를 추천해 드릴게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'restaurant_query':
-          responseText = "주변 맛집을 검색해 드릴게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'travel_query':
-          responseText = "가실 만한 여행지를 추천해 드릴게요.";
-          await _flutterTts.speak(responseText);
-          break;
         case 'health_query':
         case 'tech_query':
         case 'finance_query':
-          responseText = "요청하신 분야의 정보를 찾아볼게요.";
-          await _flutterTts.speak(responseText);
-          break;
         default:
-          responseText = '요청을 이해하지 못했어요. 다시 말씀해주세요.';
-          await _flutterTts.speak(responseText);
-          break;
+          // LLM을 사용하여 자연스러운 답변 생성
+          final responsePrompt = """
+          당신은 주유 중인 운전자를 돕는 친절한 AI 비서입니다.
+          사용자의 질문에 대해 간결하고 친절한 한 문장으로 답변해주세요.
+          
+          사용자 질문: "$command"
+          """;
+          responseText = await LlmService.generateTextOnly(responsePrompt);
       }
 
+      // 1. 화면의 텍스트를 먼저 업데이트합니다.
       if (mounted) {
         setState(() {
           _voiceCommandStatusText = responseText;
         });
       }
+      // 2. UI가 실제로 렌더링된 다음 TTS 실행
+      await _flutterTts.speak(responseText);
     } catch (e) {
       debugPrint('LLM 의도 분석 오류: $e');
+      // API 오류 발생 시 사용자에게 피드백 제공
+      const String errorMessage = 'AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해주세요.';
+      await _flutterTts.speak(errorMessage);
+      if (mounted) {
+        setState(() {
+          _voiceCommandStatusText = errorMessage;
+        });
+      }
     }
   }
+
+  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
+  bool get _isVoiceProcessing => _isListening || _voiceCommandStatusText == '분석 중...' || _isSpeaking;
 
   void _extractIpAndStartPolling() {
     try {
@@ -204,6 +222,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _tabController?.dispose();
     _countdownTimer?.cancel();
     _flutterTts.stop();
     super.dispose();
@@ -223,12 +242,16 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
         final body = jsonDecode(res.body);
         if (body is Map) {
           final s = (body['status'] ?? '').toString();
-          final p = int.tryParse(body['progress']?.toString() ?? '') ?? 0;
+          final p = (int.tryParse(body['progress']?.toString() ?? '0') ?? 0).clamp(0, 100);
+          
+          const totalDuration = 60.0; // 총 주유 시간 (초)
+          final remainingSeconds = (totalDuration * (100 - p) / 100).round();
+
           setState(() {
             _status = s.isNotEmpty ? s : _status;
-            _progress = p.clamp(0, 100);
+            _progress = p;
+            _isFinishingSoon = remainingSeconds <= 20;
           });
-
           if (s == 'completed' || s == 'done' || s == 'finished') {
             _onCompleted();
           }
@@ -243,14 +266,14 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
     if (_completed) return;
     _timer?.cancel();
 
-    await _flutterTts.speak("주유를 완료했습니다. 안녕히 가세요.");
-
     if (!mounted) return;
     setState(() {
       _completed = true;
       _status = '주유 완료';
       _progress = 100;
     });
+
+    await _flutterTts.speak("주유를 완료했습니다. 안녕히 가세요.");
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_countdown > 1) {
@@ -296,29 +319,36 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
               flex: 5,
               child: _serverIp == null
                   ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: tossBlue))
-                  : Column(
-                      children: [
-                        Expanded(
-                          child: Card(
-                            clipBehavior: Clip.antiAlias,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            elevation: 0,
-                            color: lightGrayBg,
-                            child: VideoViewWidget(serverIp: _serverIp!),
+                  : Card(
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                      color: lightGrayBg,
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: TabBarView(
+                              controller: _tabController,
+                              children: [
+                                RealSenseViewWidget(serverIp: _serverIp!),
+                                VideoViewWidget(serverIp: _serverIp!),
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        Expanded(
-                          child: Card(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            clipBehavior: Clip.antiAlias,
-                            elevation: 0,
-                            color: lightGrayBg,
-                            child: RealSenseViewWidget(serverIp: _serverIp!),
+                          TabBar(
+                            controller: _tabController,
+                            labelColor: darkGrayText,
+                            unselectedLabelColor: lightGrayText,
+                            indicatorColor: tossBlue,
+                            indicatorWeight: 3.0,
+                            dividerColor: Colors.transparent, // 탭 하단 구분선 제거
+                            tabs: const [
+                              Tab(text: '로봇 뷰'),
+                              Tab(text: '차량 뷰'),
+                            ],
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
             ),
             const SizedBox(height: 24),
@@ -369,15 +399,18 @@ class _FuelProgressScreenState extends State<FuelProgressScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      icon: Icon(_isListening ? Icons.mic_off : Icons.mic, color: darkGrayText),
-                      onPressed: _toggleListening,
+                      icon: Icon(
+                        _isVoiceProcessing || _isFinishingSoon ? Icons.mic_off : Icons.mic,
+                        color: _isVoiceProcessing || _isFinishingSoon ? Colors.grey : darkGrayText,
+                      ),
+                      onPressed: _isVoiceProcessing || _isFinishingSoon ? null : _toggleListening,
                       tooltip: '궁금한 점을 질문하세요',
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _voiceCommandStatusText,
-                        style: const TextStyle(fontSize: 16, color: lightGrayText),
+                        style: TextStyle(fontSize: 16, color: _isFinishingSoon ? Colors.grey : lightGrayText),
                       ),
                     ),
                   ],

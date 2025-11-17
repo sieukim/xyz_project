@@ -24,7 +24,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _isListening = false;
   String _recognizedWords = '';
   bool isProcessing = false;
-  final String rosServerUrl = 'http://192.168.50.210:8000/start_fuel'; // 수정 필요
+  final String rosServerUrl = 'http://192.168.50.211:8000/start_fuel'; // 수정 필요
   String _selectedPaymentMethod = '신용카드';
   int _selectedCardIndex = 0;
   final List<String> _cardNumbers = [];
@@ -47,20 +47,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _initStt() async {
     await _speechToText.initialize(
-      onStatus: (status) => setState(() => _isListening = _speechToText.isListening),
+      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
     );
   }
 
   void _toggleListening() {
     if (!_speechToText.isAvailable) return;
     if (_isListening) {
-      _speechToText.stop();
+      _stopListening();
     } else {
-      setState(() => _recognizedWords = '듣는 중...');
+      _startListening();
+    }
+  }
+
+  void _startListening() {
+    if (!_speechToText.isAvailable) return;
+    setState(() {
+      _isListening = true;
+      _recognizedWords = '듣는 중...';
+    });
       _speechToText.listen(
         onResult: (result) {
           if (result.finalResult) {
-            setState(() => _recognizedWords = result.recognizedWords);
             _processVoiceCommand(result.recognizedWords);
           }
         },
@@ -68,24 +76,37 @@ class _PaymentScreenState extends State<PaymentScreen> {
         listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
       );
     }
+
+  void _stopListening() {
+    _speechToText.stop();
+    if (!mounted) return;
+    setState(() {
+      _isListening = false;
+      _recognizedWords = '';
+    });
   }
 
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
-
-    setState(() => _recognizedWords = '분석 중...');
+    setState(() {
+      _isListening = false;
+      _recognizedWords = '분석 중...';
+    });
 
     final prompt = """
-    사용자의 결제 요청에서 결제 수단을 추출해줘.
+    사용자의 결제 요청에서 결제 수단과 결제 실행 여부를 추출해줘.
     - 사용 가능한 결제 수단: '신용카드', '네이버페이', '카카오페이', '토스페이'.
     - 사용자가 '카드'라고 말하면 '신용카드'로 인식해줘.
     - 사용자가 "N번째 카드" 또는 "N번 카드"라고 말하면, 카드 인덱스를 0부터 시작하는 숫자로 알려줘. (예: "3번 카드" -> 2)
     - "가운데 카드"는 인덱스 2로 처리해줘.
-    - "마지막 카드"는 인덱스 4로 처리해줘.
+    - "마지막 카드"는 인덱스 4로 처리해줘.    
+    - 카드 색상과 인덱스는 다음과 같이 매칭해줘: '회색' 또는 '검정색' -> 0, '파란색' 또는 '하늘색'-> 1, '주황색' 또는 '분홍색' -> 2, '초록색' 또는 '노란색' -> 3, '보라색' -> 4.
+    - 사용자가 '결제', '해줘', '할게' 등 결제를 실행하려는 의도를 보이면 "performPayment": true 를 포함해줘.
     - 결과는 반드시 JSON 형식으로 반환해줘.
-    - 예시 1: "카카오페이로 결제" -> {"paymentMethod": "카카오페이"}
-    - 예시 2: "세 번째 카드로 할게" -> {"paymentMethod": "신용카드", "cardIndex": 2}
-    - 예시 3: "가운데 카드로 결제" -> {"paymentMethod": "신용카드", "cardIndex": 2}
+    - 예시 1: "카카오페이" -> {"paymentMethod": "카카오페이"}
+    - 예시 2: "세 번째 카드로 할게" -> {"paymentMethod": "신용카드", "cardIndex": 2, "performPayment": true}
+    - 예시 3: "가운데 카드로 결제해줘" -> {"paymentMethod": "신용카드", "cardIndex": 2, "performPayment": true}
+    - 예시 4: "파란색 카드로 해줘" -> {"paymentMethod": "신용카드", "cardIndex": 1, "performPayment": true}
     - 알 수 없다면 null 값을 사용해줘.
 
     사용자 요청: "$command"
@@ -93,7 +114,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     try {
       final result = await LlmService.generateContent(prompt);
+      bool shouldPay = false; // 결제 실행 여부 플래그
+
       setState(() {
+        // 1. 결제 수단 업데이트
         final method = result['paymentMethod'] as String?;
         if (method == null) return;
 
@@ -112,7 +136,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
         // LLM이 수정한 내용을 바탕으로 화면에 표시할 텍스트를 업데이트
         _recognizedWords = displayText;
+
+        // 2. 결제 실행 여부 확인
+        if (result['performPayment'] == true) {
+          shouldPay = true;
+        }
       });
+
+      // 3. 결제 실행 (setState 밖에서 호출)
+      if (shouldPay) await simulatePayment();
     } catch (e) {
       debugPrint('LLM 결제수단 분석 오류: $e');
       setState(() {
@@ -120,6 +152,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       });
     }
   }
+
+  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
+  bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
 
   Future<void> simulatePayment() async {
     setState(() => isProcessing = true);
@@ -240,12 +275,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
         itemCount: 5,
         itemBuilder: (context, index) {
           return GestureDetector(
-            onTap: () {
-              setState(() {
-                _selectedCardIndex = index;
-                _selectedPaymentMethod = '신용카드';
-              });
-            },
+            onTap: _isVoiceProcessing
+                ? null
+                : () {
+                    setState(() {
+                      _selectedCardIndex = index;
+                      _selectedPaymentMethod = '신용카드';
+                    });
+                  },
             child: _buildCardItem(index),
           );
         },
@@ -269,12 +306,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
         return Expanded(
           child: GestureDetector(
-            onTap: () {
-              setState(() {
-                _selectedPaymentMethod = methodName;
-                _selectedCardIndex = -1; // Deselect card
-              });
-            },
+            onTap: _isVoiceProcessing
+                ? null
+                : () {
+                    setState(() {
+                      _selectedPaymentMethod = methodName;
+                      _selectedCardIndex = -1; // Deselect card
+                    });
+                  },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               height: 60,
@@ -353,8 +392,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     child: Row(
                       children: [
                         IconButton(
-                          icon: Icon(_isListening ? Icons.mic_off : Icons.mic, color: darkGrayText),
-                          onPressed: _toggleListening,
+                          icon: Icon(
+                            _isVoiceProcessing ? Icons.mic_off : Icons.mic,
+                            color: _isVoiceProcessing ? Colors.grey : darkGrayText,
+                          ),
+                          onPressed: isProcessing || _isVoiceProcessing ? null : _toggleListening,
                           tooltip: '음성으로 결제수단 선택',
                         ),
                         const SizedBox(width: 8),
@@ -387,7 +429,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: ElevatedButton(
-          onPressed: isProcessing ? null : simulatePayment,
+          onPressed: isProcessing || _isVoiceProcessing ? null : simulatePayment,
           style: ElevatedButton.styleFrom(
             backgroundColor: tossBlue,
             padding: const EdgeInsets.symmetric(vertical: 16),
