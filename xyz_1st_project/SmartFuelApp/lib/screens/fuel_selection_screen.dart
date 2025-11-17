@@ -25,6 +25,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
   String _recognizedWords = '';
+  bool _isSpeaking = false; // TTS 동작 여부를 추적하는 상태 변수
   
   String _carNumber = ''; // 상태 변수로 변경
   // OCR HTTP 폴링 관련 변수
@@ -424,22 +425,37 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: ElevatedButton(
-          onPressed: selectedPreset == null
+          // _isSpeaking이 true이거나 selectedPreset이 null이면 버튼 비활성화
+          onPressed: (selectedPreset == null || _isSpeaking)
               ? null
               : () async {
+                  // 음성 안내 시작 시 상태 업데이트 및 버튼 비활성화
+                  setState(() {
+                    _isSpeaking = true;
+                  });
+
                   // 결제할 유종과 금액을 음성으로 안내합니다.
                   final String speakAmount =
                       amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
                   
                   // for 루프를 사용하여 차량 번호를 한 글자씩 발음합니다.
                   // 숫자를 말하는 동안만 발음 속도를 높입니다.
-                  await _flutterTts.setSpeechRate(1.5);
-                  for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
-                    await _flutterTts.speak(num);
+                  try {
+                    await _flutterTts.setSpeechRate(1.5);
+                    for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
+                      await _flutterTts.speak(num);
+                    }
+                    // 원래 속도로 복원하여 다음 문장을 말합니다.
+                    await _flutterTts.setSpeechRate(1.0);
+                    await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
+                  } finally {
+                    // 음성 안내가 끝나면(성공/실패 무관) 상태 업데이트 및 버튼 활성화
+                    if (mounted) {
+                      setState(() {
+                        _isSpeaking = false;
+                      });
+                    }
                   }
-                  // 원래 속도로 복원하여 다음 문장을 말합니다.
-                  await _flutterTts.setSpeechRate(1.0);
-                  await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
 
                   if (!mounted) return;
                   
