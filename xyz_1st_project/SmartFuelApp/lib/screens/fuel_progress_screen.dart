@@ -6,9 +6,11 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:smart_fuel/config/app_config.dart';
 import 'package:smart_fuel/widgets/realsense_view.dart';
 import 'package:smart_fuel/services/llm_service.dart';
 import 'package:smart_fuel/widgets/webcam_view.dart';
+import 'package:smart_fuel/screens/fuel_selection_screen.dart';
 
 class FuelProgressScreen extends StatefulWidget {
   final String orderId;
@@ -143,8 +145,8 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
           responseText = "현재 $_progress% 완료, 약 $remainingPercent% 남았습니다.";
           break;
         case 'time_query':
-          const totalDuration = 60.0; // 총 주유 시간 (초)
-          final remainingSeconds = (totalDuration * (100 - _progress) / 100).round();
+          final totalDuration = AppConfig.totalFuelingSeconds;
+          final remainingSeconds = (totalDuration * (100 - _progress) / 100.0).round();
           responseText = "약 $remainingSeconds초 남았습니다.";
           break;
         case 'hungry_query':
@@ -244,8 +246,8 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
           final s = (body['status'] ?? '').toString();
           final p = (int.tryParse(body['progress']?.toString() ?? '0') ?? 0).clamp(0, 100);
           
-          const totalDuration = 60.0; // 총 주유 시간 (초)
-          final remainingSeconds = (totalDuration * (100 - p) / 100).round();
+          final totalDuration = AppConfig.totalFuelingSeconds;
+          final remainingSeconds = (totalDuration * (100 - p) / 100.0).round();
 
           setState(() {
             _status = s.isNotEmpty ? s : _status;
@@ -290,7 +292,13 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
   void _navigateToHome() {
     if (mounted) {
       _countdownTimer?.cancel();
-      Navigator.popUntil(context, (route) => route.isFirst);
+      // 현재 화면이 스택의 첫 번째 화면이므로 popUntil이 동작하지 않습니다.
+      // 모든 이전 경로를 지우고 FuelSelectionScreen으로 이동합니다.
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const FuelSelectionScreen()),
+        (Route<dynamic> route) => false, // 모든 이전 라우트를 제거합니다.
+      );
     }
   }
 
@@ -330,8 +338,16 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
                             child: TabBarView(
                               controller: _tabController,
                               children: [
-                                RealSenseViewWidget(serverIp: _serverIp!),
-                                VideoViewWidget(serverIp: _serverIp!),
+                                // 로봇 뷰 (RealSense)
+                                RealSenseViewWidget(
+                                  serverIp: AppConfig.rosIp,
+                                  streamPort: AppConfig.realsenseStreamerPort.toString(),
+                                ),
+                                // 차량 뷰 (Webcam)
+                                VideoViewWidget(
+                                  serverIp: AppConfig.rosIp,
+                                  streamPort: AppConfig.webcamStreamerPort.toString(),
+                                ),
                               ],
                             ),
                           ),
@@ -342,10 +358,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
                             indicatorColor: tossBlue,
                             indicatorWeight: 3.0,
                             dividerColor: Colors.transparent, // 탭 하단 구분선 제거
-                            tabs: const [
-                              Tab(text: '로봇 뷰'),
-                              Tab(text: '차량 뷰'),
-                            ],
+                            tabs: const [Tab(text: '로봇 뷰'), Tab(text: '차량 뷰')],
                           ),
                         ],
                       ),

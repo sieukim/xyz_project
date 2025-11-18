@@ -7,6 +7,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 import '../services/kakao_login_service.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '../services/google_login_service.dart';
+import '../config/app_config.dart';
 import '../services/llm_service.dart';
 import 'payment_screen.dart';
 import 'login_screen.dart';
@@ -72,9 +73,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
   /// OCR 텍스트를 주기적으로 가져오기 시작합니다.
   void _startOcrPolling() {
-    // ❗️ ROS PC의 IP 주소로 변경해주세요.
-    const rosIpAddress = '192.168.50.211'; 
-    final url = Uri.parse('http://$rosIpAddress:8083/ocr_text');
+    final url = Uri.parse('${AppConfig.ocrStreamerUrl}/ocr_text');
 
     _ocrPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       try {
@@ -104,6 +103,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     await _flutterTts.setSpeechRate(1.0);
     // speak 함수가 음성 출력을 완료할 때까지 기다리도록 설정합니다.
     await _flutterTts.awaitSpeakCompletion(true);
+
+    // ⚠️ start/completion 핸들러 제거 (버튼 깜빡임 원인 제거)
+    // _isSpeaking은 결제 버튼에서만 제어하도록 변경
   }
 
   Future<void> _initStt() async {
@@ -114,12 +116,10 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
   Future<void> _speakIntro() async {
     // 숫자와 문자를 분리하여 순차적으로 발화
-    // 숫자를 말하는 동안만 발음 속도를 높입니다.
     await _flutterTts.setSpeechRate(1.5);
     for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
       await _flutterTts.speak(num);
     }
-    // 원래 속도로 복원하여 다음 문장을 말합니다.
     await _flutterTts.setSpeechRate(1.0);
     await _flutterTts.speak('고객님, 안녕하세요, 유종과 금액을 말씀해주세요.');
   }
@@ -164,7 +164,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   /// LLM을 사용하여 음성 명령을 분석하고 상태를 업데이트합니다.
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
-    // 상태 변경을 하나로 통합: '분석 중'으로 바꾸고, isListening은 false로 설정
+
     setState(() {
       _recognizedWords = '분석 중...';
       _isListening = false;
@@ -184,17 +184,15 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       final result = await LlmService.generateContent(prompt);
 
       setState(() {
-        // LLM 응답에서 유종 정보 추출 및 업데이트
         final extractedFuelType = result['fuelType'] as String?;
         if (extractedFuelType != null && ['휘발유', '경유', '전기'].contains(extractedFuelType)) {
           fuelType = extractedFuelType;
         }
 
-        // LLM 응답에서 금액 정보 추출 및 업데이트, 화면 표시용 변수 준비
         String amountForDisplay = '';
         final extractedAmount = result['amount'] as int?;
         if (extractedAmount != null) {
-          if (extractedAmount == -1) { // '가득'을 -1로 처리하기로 약속
+          if (extractedAmount == -1) {
             amount = maxAmount;
             selectedPreset = maxAmount;
             amountForDisplay = '가득';
@@ -205,7 +203,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           }
         }
 
-        // LLM이 수정한 내용을 바탕으로 화면에 표시할 텍스트를 새로 조합
         final correctedFuel = extractedFuelType ?? fuelType;
         _recognizedWords = '$correctedFuel $amountForDisplay'.trim();
       });
@@ -217,13 +214,11 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     }
   }
 
-  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
   bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
 
 
   @override
   Widget build(BuildContext context) {
-    // Toss-style Design Palette
     const tossBlue = Color(0xFF3182F7);
     const lightGray = Color(0xFFF2F4F6);
     const darkGrayText = Color(0xFF333D4B);
@@ -237,12 +232,10 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         elevation: 0,
         iconTheme: const IconThemeData(color: darkGrayText),
         actions: [
-          // 카카오톡 내 정보 보기 버튼
           IconButton(
             tooltip: '카카오톡 내 정보 보기',
             icon: const Icon(Icons.account_circle_outlined),
             onPressed: () async {
-              // 로딩 표시
               if (!mounted) return;
               final navigator = Navigator.of(context);
               showDialog<void>(
@@ -256,11 +249,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
               try {
                 user = await KakaoLoginService.instance.getUserInfo();
               } catch (e) {
-                // close loading dialog using captured navigator
                 navigator.pop();
                 debugPrint('카카오 사용자 정보 조회 실패: $e');
                 if (!mounted) return;
-                // schedule dialog on next frame to avoid using the outer BuildContext
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   showDialog<void>(
                     context: context,
@@ -278,12 +269,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
                 return;
               }
 
-              // close loading dialog using captured navigator
               navigator.pop();
               if (!mounted) return;
 
-              // 프로필 화면으로 이동
-              if (!mounted) return;
               navigator.push(
                 MaterialPageRoute(builder: (_) {
                   return Scaffold(
@@ -295,7 +283,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
                           user: user,
                           loginType: 'kakao',
                           onLogoutPressed: () async {
-                            // capture navigator to avoid using context across async gaps
                             final navigator = Navigator.of(context);
                             final should = await showDialog<bool>(
                               context: context,
@@ -398,67 +385,45 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- 차량 번호 인식 섹션 ---
             _buildSectionTitle('차량 번호', darkGrayText),
             _buildOcrResultCard(lightGray, darkGrayText),
             const SizedBox(height: 32),
 
-            // --- 음성 인식 섹션 ---
             _buildSectionTitle('음성 인식', darkGrayText),
             _buildVoiceCommandCard(lightGray, darkGrayText),
             const SizedBox(height: 32),
 
-            // --- 유종 선택 섹션 ---
             _buildSectionTitle('유종 선택', darkGrayText),
             _buildFuelTypeSelector(tossBlue, lightGray, darkGrayText),
             const SizedBox(height: 32),
 
-            // --- 주유 금액 선택 섹션 ---
             _buildSectionTitle('주유 금액 선택', darkGrayText),
             _buildAmountSelector(tossBlue, lightGray, darkGrayText),
             const SizedBox(height: 40),
           ],
         ),
       ),
-      // --- 하단 결제 버튼 ---
+
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: ElevatedButton(
-          // TTS가 동작 중이거나, 선택된 금액이 없으면 비활성화
           onPressed: (selectedPreset == null || _isSpeaking)
               ? null
               : () async {
-                  // 음성 안내 시작 시 상태 업데이트 및 버튼 비활성화
-                  setState(() {
-                    _isSpeaking = true;
-                  });
+                  setState(() => _isSpeaking = true);
 
-                  // 결제할 유종과 금액을 음성으로 안내합니다.
                   final String speakAmount =
                       amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
-                  
-                  // for 루프를 사용하여 차량 번호를 한 글자씩 발음합니다.
-                  // 숫자를 말하는 동안만 발음 속도를 높입니다.
-                  try {
-                    await _flutterTts.setSpeechRate(1.5);
-                    for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
-                      await _flutterTts.speak(num);
-                    }
-                    // 원래 속도로 복원하여 다음 문장을 말합니다.
-                    await _flutterTts.setSpeechRate(1.0);
-                    await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
-                  } finally {
-                    // 음성 안내가 끝나면(성공/실패 무관) 상태 업데이트 및 버튼 활성화
-                    if (mounted) {
-                      setState(() {
-                        _isSpeaking = false;
-                      });
-                    }
-                  }
 
+                  await _flutterTts.setSpeechRate(1.5);
+                  for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
+                    await _flutterTts.speak(num);
+                  }
+                  await _flutterTts.setSpeechRate(1.0);
+                  await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
                   if (!mounted) return;
-                  
-                  Navigator.push(
+
+                  Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(
                       builder: (_) => PaymentScreen(
@@ -479,16 +444,15 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
             ),
             elevation: 0,
           ),
-          child: Text(
+          child: const Text(
             '결제하기',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
         ),
       ),
     );
   }
 
-  // 섹션 타이틀 위젯
   Widget _buildSectionTitle(String title, Color color) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
@@ -496,7 +460,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
-  // OCR 결과 표시 위젯
   Widget _buildOcrResultCard(Color bgColor, Color textColor) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -518,7 +481,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       ),
     );
   }
-  // 음성 인식 카드 위젯
+
   Widget _buildVoiceCommandCard(Color bgColor, Color textColor) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -548,7 +511,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
-  // 유종 선택 위젯
   Widget _buildFuelTypeSelector(Color selectedColor, Color bgColor, Color textColor) {
     final fuelTypes = {
       '휘발유': Icons.local_gas_station,
@@ -587,14 +549,13 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
-  // 금액 선택 위젯
   Widget _buildAmountSelector(Color selectedColor, Color bgColor, Color textColor) {
     return GridView.builder(
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 2.5, // 버튼의 가로세로 비율
+        childAspectRatio: 2.5,
       ),
       itemCount: _presets.length,
       shrinkWrap: true,
@@ -635,7 +596,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
-  // 간단한 천단위 콤마 포맷터 (의존성 없이 구현)
   String _formatCurrency(int value) {
     final s = value.toString();
     final reg = RegExp(r'\B(?=(\d{3})+(?!\d))');

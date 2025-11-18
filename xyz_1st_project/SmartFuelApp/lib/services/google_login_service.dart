@@ -1,15 +1,13 @@
 import 'package:google_sign_in/google_sign_in.dart';
+import '../config/app_config.dart';
 
 class GoogleLoginService {
   static final GoogleLoginService _instance = GoogleLoginService._internal();
   static GoogleLoginService get instance => _instance;
   GoogleLoginService._internal();
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    // Android용 OAuth 2.0 클라이언트 ID를 설정해야 합니다.
-    // Firebase Console에서 프로젝트를 생성하고 Google Sign-In을 구성한 후
-    // google-services.json 파일을 android/app/ 디렉토리에 추가해야 합니다.
-    clientId: '705920863475-al935ukn40efqh57n22qq1gqo1f2pggq.apps.googleusercontent.com',
+  GoogleSignIn get _googleSignIn => GoogleSignIn(
+    clientId: AppConfig.googleSignInClientId,
     scopes: [
       'email',
       'profile',

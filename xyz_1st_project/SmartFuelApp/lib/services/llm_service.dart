@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 class LlmService {
-  // ⚠️ 실제 앱에서는 API 키를 .env 파일 등으로 안전하게 관리해야 합니다.
-  static const String _apiKey = '';
-  static final String _modelEndpoint =
+  static String get _apiKey => AppConfig.geminiApiKey;
+  static String get _modelEndpoint =>
       'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$_apiKey';
 
   /// LLM API를 호출하여 주어진 프롬프트를 기반으로 콘텐츠를 생성합니다.

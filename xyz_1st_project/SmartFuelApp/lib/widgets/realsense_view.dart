@@ -4,10 +4,10 @@ import 'package:webview_flutter/webview_flutter.dart';
 class RealSenseViewWidget extends StatefulWidget {
   // ✅ 1. 하드코딩된 IP 대신 파라미터로 받도록 변경
   final String serverIp;
-  final String streamPort = '8081'; // Realsense 스트리머 포트
+  final String streamPort; // Realsense 스트리머 포트
 
   // ✅ 2. 생성자에서 serverIp를 필수로 받음
-  const RealSenseViewWidget({Key? key, required this.serverIp}) : super(key: key);
+  const RealSenseViewWidget({Key? key, required this.serverIp, required this.streamPort}) : super(key: key);
 
   @override
   State<RealSenseViewWidget> createState() => _RealSenseViewWidgetState();

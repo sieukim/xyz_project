@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'fuel_progress_screen.dart';
 import 'dart:math';
+import '../config/app_config.dart';
 import '../services/llm_service.dart';
 
 class PaymentScreen extends StatefulWidget {
@@ -24,7 +25,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _isListening = false;
   String _recognizedWords = '';
   bool isProcessing = false;
-  final String rosServerUrl = 'http://192.168.50.211:8000/start_fuel'; // 수정 필요
   String _selectedPaymentMethod = '신용카드';
   int _selectedCardIndex = 0;
   final List<String> _cardNumbers = [];
@@ -175,7 +175,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       final res = await http
           .post(
-            Uri.parse(rosServerUrl),
+            Uri.parse('${AppConfig.rosBaseUrl}/start_fuel'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(payload),
           )
@@ -198,8 +198,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           MaterialPageRoute(
             builder: (_) => FuelProgressScreen(
               orderId: returnedOrderId,
-              rosBaseUrl:
-                  rosServerUrl.replaceFirst(RegExp(r'/start_fuel\/?'), ''),
+              rosBaseUrl: AppConfig.rosBaseUrl,
             ),
           ),
         );
