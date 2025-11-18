@@ -28,13 +28,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String _selectedPaymentMethod = '신용카드';
   int _selectedCardIndex = 0;
   final List<String> _cardNumbers = [];
+  bool _isAwaitingConfirmation = false; // 결제 확인 대기 상태
 
   @override
   void initState() {
     super.initState();
     _initTts();
-    _initStt();
-    // Generate random card numbers
+    _initStt().then((_) {
+      // STT 초기화 후, 화면이 완전히 빌드된 다음 음성 안내 및 인식 시작
+      WidgetsBinding.instance.addPostFrameCallback((_) => _speakAndListen());
+    });
+
     for (int i = 0; i < 5; i++) {
       _cardNumbers.add((Random().nextInt(9000) + 1000).toString());
     }
@@ -49,6 +53,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
     await _speechToText.initialize(
       onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
     );
+  }
+
+  Future<void> _speakAndListen() async {
+    if (!mounted) return;
+    await _flutterTts.speak('결제 수단을 말씀해주세요.');
+    _startListening();
   }
 
   void _toggleListening() {
@@ -73,7 +83,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           }
         },
         localeId: 'ko_KR',
-        listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
+        listenFor: const Duration(seconds: 3),
       );
     }
 
@@ -100,13 +110,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
     - 사용자가 "N번째 카드" 또는 "N번 카드"라고 말하면, 카드 인덱스를 0부터 시작하는 숫자로 알려줘. (예: "3번 카드" -> 2)
     - "가운데 카드"는 인덱스 2로 처리해줘.
     - "마지막 카드"는 인덱스 4로 처리해줘.    
-    - 카드 색상과 인덱스는 다음과 같이 매칭해줘: '회색' 또는 '검정색' -> 0, '파란색' 또는 '하늘색'-> 1, '주황색' 또는 '분홍색' -> 2, '초록색' 또는 '노란색' -> 3, '보라색' -> 4.
+    - 카드 색상과 인덱스 매칭: '회색'/'검정색' -> 0, '파란색'/'하늘색'-> 1, '주황색'/'분홍색' -> 2, '초록색'/'노란색' -> 3, '보라색' -> 4.
     - 사용자가 '결제', '해줘', '할게' 등 결제를 실행하려는 의도를 보이면 "performPayment": true 를 포함해줘.
+    - 사용자가 "응", "네", "맞아" 등 긍정적인 답변을 하면 "confirmation": "positive" 를 포함해줘.
     - 결과는 반드시 JSON 형식으로 반환해줘.
     - 예시 1: "카카오페이" -> {"paymentMethod": "카카오페이"}
     - 예시 2: "세 번째 카드로 할게" -> {"paymentMethod": "신용카드", "cardIndex": 2, "performPayment": true}
     - 예시 3: "가운데 카드로 결제해줘" -> {"paymentMethod": "신용카드", "cardIndex": 2, "performPayment": true}
     - 예시 4: "파란색 카드로 해줘" -> {"paymentMethod": "신용카드", "cardIndex": 1, "performPayment": true}
+    - 예시 5: "응" -> {"confirmation": "positive"}
     - 알 수 없다면 null 값을 사용해줘.
 
     사용자 요청: "$command"
@@ -114,42 +126,71 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     try {
       final result = await LlmService.generateContent(prompt);
-      bool shouldPay = false; // 결제 실행 여부 플래그
+      final method = result['paymentMethod'] as String?;
+      final index = result['cardIndex'] as int?;
+      final shouldPay = result['performPayment'] == true;
+      final confirmation = result['confirmation'] as String?;
+
+      // 1. 결제 확인 대기 상태에서 긍정 답변을 받았을 경우
+      if (_isAwaitingConfirmation && confirmation == 'positive') {
+        setState(() => _isAwaitingConfirmation = false);
+        await simulatePayment();
+        return;
+      }
+
+      if (method == null && confirmation == null) {
+        throw Exception("결제 수단을 인식하지 못했습니다.");
+      }
+
+      // `method`가 null이 아닐 때만 로직을 진행합니다.
+      if (method == null) {
+        return; // 또는 다른 오류 처리
+      }
+
+      String displayText = method;
+
+      if (method == '신용카드') {
+        if (index != null && index >= 0 && index < _cardNumbers.length) {
+          displayText = '신용카드 ${index + 1}';
+        } else {
+          // '신용카드'라고만 말한 경우, 첫 번째 카드를 기본으로 선택
+          _selectedCardIndex = 0;
+          displayText = '신용카드 1';
+        }
+      }
+
+      if (shouldPay) {
+        displayText += '으로 결제합니다.';
+      }
 
       setState(() {
-        // 1. 결제 수단 업데이트
-        final method = result['paymentMethod'] as String?;
-        if (method == null) return;
-
         _selectedPaymentMethod = method;
-        String displayText = method;
-
         if (method == '신용카드') {
-          final index = result['cardIndex'] as int?;
-          if (index != null && index >= 0 && index < _cardNumbers.length) {
-            _selectedCardIndex = index;
-            displayText = '신용카드 ${index + 1}'; // 화면 표시용 텍스트
-          }
+          _selectedCardIndex = index ?? _selectedCardIndex;
         } else {
-          _selectedCardIndex = -1; // 간편결제 선택 시 카드 선택 해제
+          _selectedCardIndex = -1;
         }
-
-        // LLM이 수정한 내용을 바탕으로 화면에 표시할 텍스트를 업데이트
         _recognizedWords = displayText;
-
-        // 2. 결제 실행 여부 확인
-        if (result['performPayment'] == true) {
-          shouldPay = true;
-        }
       });
 
-      // 3. 결제 실행 (setState 밖에서 호출)
-      if (shouldPay) await simulatePayment();
+      if (shouldPay) {
+        await simulatePayment();
+      } else if (method != null) {
+        // 결제 수단만 언급된 경우, 되물어보기
+        _isAwaitingConfirmation = true;
+        final confirmationQuestion =
+            '${_selectedPaymentMethod == '신용카드' ? '신용카드 ${_selectedCardIndex + 1}' : _selectedPaymentMethod}(으)로 결제할까요?';
+        setState(() => _recognizedWords = confirmationQuestion);
+        await _flutterTts.speak(confirmationQuestion);
+        if (mounted) _startListening();
+      }
     } catch (e) {
       debugPrint('LLM 결제수단 분석 오류: $e');
-      setState(() {
-        _recognizedWords = '결제 수단을 이해하지 못했어요.';
-      });
+      const errorMessage = '결제 수단을 이해하지 못했어요. 다시 말씀해주세요.';
+      setState(() => _recognizedWords = errorMessage);
+      await _flutterTts.speak(errorMessage);
+      // 오류 안내 후 다시 듣기 시작
+      if (mounted) _startListening();
     }
   }
 
@@ -157,6 +198,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
 
   Future<void> simulatePayment() async {
+    await _flutterTts.speak("결제를 시작합니다.");
+
     setState(() => isProcessing = true);
 
     await Future.delayed(const Duration(seconds: 2)); // 가상 결제 지연
