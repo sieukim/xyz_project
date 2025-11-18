@@ -20,6 +20,12 @@ class FuelSelectionScreen extends StatefulWidget {
   State<FuelSelectionScreen> createState() => _FuelSelectionScreenState();
 }
 
+/// 대화의 현재 상태를 관리하기 위한 열거형
+enum ConversationContext {
+  none, // 초기 상태 또는 정보 수집 완료
+  awaitingFinalConfirmation, // 최종 결제 확인 대기 ("~로 결제할까요?")
+}
+
 class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     with SingleTickerProviderStateMixin {
   final FlutterTts _flutterTts = FlutterTts();
@@ -42,16 +48,18 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   final List<int> _presets = List.generate(12, (i) => (i + 1) * 10000);
   int? selectedPreset = 50000; // 기본으로 50,000원 선택
 
+  // 대화 상태를 추적하는 변수
+  ConversationContext _conversationContext = ConversationContext.none;
+
   @override
   void initState() {
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 5),
+      duration: const Duration(seconds: 2),
     );
     // 비동기 초기화 로직을 별도 함수로 분리하여 호출합니다.
     _initialize();
-    _startOcrPolling();
   }
 
   @override
@@ -67,8 +75,9 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
   Future<void> _initialize() async {
     await _initTts();
     await _initStt();
-    // 모든 초기화가 끝난 후, 위젯이 화면에 완전히 그려진 다음 음성 안내를 시작합니다.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _speakIntro());
+    _startOcrPolling();
+    // 위젯이 완전히 그려진 후, 초기 음성 안내 및 대화 시작
+    WidgetsBinding.instance.addPostFrameCallback((_) => _speakIntroAfterOcr());
   }
 
   /// OCR 텍스트를 주기적으로 가져오기 시작합니다.
@@ -110,22 +119,59 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
   Future<void> _initStt() async {
     await _speechToText.initialize(
-      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
+      options: [SpeechToText.webDoNotAggregate], // 웹 호환성 옵션 추가
+      onError: (error) {
+        debugPrint('STT Error: ${error.errorMsg}');
+        if (mounted) {
+          setState(() {
+            _recognizedWords = '음성 인식 오류가 발생했습니다.';
+            _isListening = false;
+          });
+        }
+      },
+      onStatus: (status) {
+        debugPrint('STT Status: $status');
+        // 리스닝이 멈췄고(notListening), 다른 음성 작업(TTS, LLM 분석) 중이 아닐 때
+        // 자동으로 다시 리스닝을 시작하여 대화 흐름을 유지합니다.
+        if (status == 'notListening' && mounted && !_isSpeaking && _recognizedWords != '분석 중...') {
+          // 리스닝이 멈췄고, 다른 작업 중이 아닐 때 다시 시작
+          _startListening();
+        }
+      },
     );
   }
+  /// OCR로 차량 번호가 인식된 후 초기 음성 안내를 합니다.
+  Future<void> _speakIntroAfterOcr() async {
+    // 차량 번호가 인식될 때까지 잠시 대기합니다. (최대 5초)
+    int attempts = 0;
+    while (_carNumber.isEmpty && attempts < 5) {
+      await Future.delayed(const Duration(seconds: 1));
+      attempts++;
+    }
 
-  Future<void> _speakIntro() async {
+    if (!mounted || _carNumber.isEmpty) return;
+
+    // TTS 시작 시 상태 업데이트
+    setState(() => _isSpeaking = true);
+
     // 숫자와 문자를 분리하여 순차적으로 발화
     await _flutterTts.setSpeechRate(1.5);
     for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
       await _flutterTts.speak(num);
     }
     await _flutterTts.setSpeechRate(1.0);
-    await _flutterTts.speak('고객님, 안녕하세요, 유종과 금액을 말씀해주세요.');
+    await _flutterTts.speak('고객님, 안녕하세요. 유종과 금액을 말씀해주세요.');
+
+    // TTS 종료 후 상태 복원 및 음성 인식 시작
+    if (mounted) {
+      setState(() => _isSpeaking = false);
+      _startListening(); // 대화 시작
+    }
   }
 
   void _startListening() {
-    if (!_speechToText.isAvailable) return;
+    // 다른 음성 관련 작업이 진행 중일 때는 시작하지 않습니다.
+    if (!_speechToText.isAvailable || _isListening || _isSpeaking || !mounted) return;
     
     setState(() {
       _isListening = true;
@@ -135,16 +181,18 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     _speechToText.listen(
       onResult: (result) {
         if (result.finalResult) {
+          // 최종 인식 결과가 나오면 LLM으로 처리
           _processVoiceCommand(result.recognizedWords);
         }
       },
-      listenFor: const Duration(seconds: 5),
+      listenFor: const Duration(seconds: 2),
       localeId: 'ko_KR',
+      // onStatus 콜백은 initialize 메소드에서 전역적으로 처리합니다.
     );
   }
 
   void _stopListening() {
-    _speechToText.stop();
+    if (_speechToText.isListening) _speechToText.stop();
     if (!mounted) return;
     
     setState(() {
@@ -172,25 +220,57 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
     try {
       final prompt = """
-    사용자의 주유 요청에서 유종과 금액을 추출해줘.
-    - 유종은 '휘발유', '경유', '전기' 중 하나여야 해.
-    - 금액은 만원 단위 숫자(예: 10000, 50000)로 변환해줘.
-    - '가득'이라는 표현은 금액을 -1로 설정해줘.
-    - 결과는 반드시 JSON 형식으로 반환해줘. 예: {"fuelType": "휘발유", "amount": 50000}
-    - 만약 유종이나 금액을 알 수 없다면 null로 설정해줘.
+    사용자의 발화를 분석해서 JSON으로 반환해줘.
+    
+    1. **정보 추출**:
+       - 'fuelType': '휘발유', '경유', '전기' 중 하나.
+       - 'amount': 만원 단위 숫자(예: 50000). '가득'은 -1로 설정.
+    
+    2. **의도 파악**:
+       - 'intent': 사용자의 핵심 의도. 'order' (주문), 'payment' (결제 요청), 'confirmation_positive' (긍정), 'confirmation_negative' (부정) 중 하나.
+         - "결제해줘", "결제할게" -> 'payment'
+         - "응", "네", "맞아" -> 'confirmation_positive'
+         - "아니", "아니요" -> 'confirmation_negative'
+         - 그 외 주유 관련 언급 -> 'order'
+    
+    **규칙**:
+    - 요청에 없는 정보는 null로 설정.
+    - 결과는 항상 JSON 형식.
+    
+    **입력**: "$command"
+    
+    **예시**:
+    - "휘발유 가득 넣어줘" -> {"fuelType": "휘발유", "amount": -1, "intent": "order"}
+    - "결제할게" -> {"intent": "payment"}
+    - "응" -> {"intent": "confirmation_positive"}
 
-    사용자 요청: "$command"
     """;
       final result = await LlmService.generateContent(prompt);
 
+      // --- 대화 로직 시작 ---
+      final intent = result['intent'] as String?;
+
+      final extractedFuelType = result['fuelType'] as String?;
+      final extractedAmount = result['amount'] as int?;
+
+      // 1. 최종 결제 확인에 대한 응답 처리 ("~로 결제할까요?" 다음)
+      if (_conversationContext == ConversationContext.awaitingFinalConfirmation) {
+        if (intent == 'confirmation_positive') {
+          _navigateToPayment(); // 긍정 -> 결제 화면으로 이동
+          return;
+        } else {
+          // 부정 또는 다른 말 -> 상태 초기화 및 다시 질문
+          _conversationContext = ConversationContext.none;
+          await _speakAndListen('다시 말씀해주세요.');
+          return;
+        }
+      }
+
       setState(() {
-        final extractedFuelType = result['fuelType'] as String?;
         if (extractedFuelType != null && ['휘발유', '경유', '전기'].contains(extractedFuelType)) {
           fuelType = extractedFuelType;
         }
-
         String amountForDisplay = '';
-        final extractedAmount = result['amount'] as int?;
         if (extractedAmount != null) {
           if (extractedAmount == -1) {
             amount = maxAmount;
@@ -206,16 +286,88 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         final correctedFuel = extractedFuelType ?? fuelType;
         _recognizedWords = '$correctedFuel $amountForDisplay'.trim();
       });
+
+      // 2. 대화 분기 처리
+      if (fuelType.isNotEmpty && selectedPreset != null) {
+        // 정보가 모두 채워졌으면 결제 확인으로 넘어감
+        _conversationContext = ConversationContext.awaitingFinalConfirmation;
+        final String speakAmount = amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
+        await _speakAndListen('$fuelType, $speakAmount 으로 결제할까요?');
+      } else {
+        // 정보가 부족하면 요청
+        _conversationContext = ConversationContext.none;
+        if (fuelType.isEmpty) {
+          await _speakAndListen('유종을 말씀해주세요.');
+        } else if (selectedPreset == null) {
+          await _speakAndListen('금액을 말씀해주세요.');
+        }
+      }
     } catch (e) {
       debugPrint('LLM 처리 오류: $e');
-      setState(() {
-        _recognizedWords = '오류가 발생했습니다. 다시 시도해주세요.';
-      });
+      await _speakAndListen('오류가 발생했습니다. 다시 시도해주세요.');
     }
+  }
+
+  /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
+  Future<void> _speakAndListen(String text) async {
+    if (!mounted) return;
+    setState(() => _recognizedWords = text); // 화면에 현재 상태 표시
+    await _flutterTts.speak(text);
+    if (mounted) _startListening();
+  }
+
+  /// 결제 화면으로 이동하는 함수
+  void _navigateToPayment() {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PaymentScreen(fuelType: fuelType, amount: amount),
+      ),
+    );
   }
 
   bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
 
+  /// 공통 로그아웃 로직
+  Future<void> _handleLogout() async {
+    final navigator = Navigator.of(context);
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('로그아웃'),
+        content: const Text('로그아웃하고 로그인 화면으로 이동하시겠습니까?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('취소')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('로그아웃')),
+        ],
+      ),
+    );
+
+    if (shouldLogout != true || !mounted) return;
+
+    // 모든 소셜 로그아웃 시도
+    try {
+      await KakaoLoginService.instance.logout();
+    } catch (e) {
+      debugPrint('Kakao logout error: $e');
+    }
+    try {
+      await GoogleLoginService.instance.signOut();
+    } catch (e) {
+      debugPrint('Google signOut error: $e');
+    }
+
+    if (!mounted) return;
+    navigator.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -282,49 +434,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
                         child: ProfileView(
                           user: user,
                           loginType: 'kakao',
-                          onLogoutPressed: () async {
-                            final navigator = Navigator.of(context);
-                            final should = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('로그아웃'),
-                                content:
-                                    const Text('로그아웃하고 로그인 화면으로 이동하시겠습니까?'),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(ctx).pop(false),
-                                      child: const Text('취소')),
-                                  TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(ctx).pop(true),
-                                      child: const Text('로그아웃')),
-                                ],
-                              ),
-                            );
-
-                            if (should != true) return;
-
-                            try {
-                              await KakaoLoginService.instance.logout();
-                            } catch (e) {
-                              debugPrint('Kakao logout error: $e');
-                            }
-
-                            try {
-                              await GoogleLoginService.instance.signOut();
-                            } catch (e) {
-                              debugPrint('Google signOut error: $e');
-                            }
-
-                            if (!mounted) return;
-
-                            navigator.pushAndRemoveUntil(
-                              MaterialPageRoute(
-                                  builder: (_) => const LoginScreen()),
-                              (route) => false,
-                            );
-                          },
+                          onLogoutPressed: _handleLogout,
                         ),
                       ),
                     ),
@@ -337,46 +447,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           IconButton(
             tooltip: '로그아웃',
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              final navigator = Navigator.of(context);
-              final should = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('로그아웃'),
-                  content: const Text('로그아웃하고 로그인 화면으로 이동하시겠습니까?'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('취소')),
-                    TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text('로그아웃')),
-                  ],
-                ),
-              );
-
-              if (should != true) return;
-              if (!mounted) return;
-
-              try {
-                await KakaoLoginService.instance.logout();
-              } catch (e) {
-                debugPrint('Kakao logout error: $e');
-              }
-
-              try {
-                await GoogleLoginService.instance.signOut();
-              } catch (e) {
-                debugPrint('Google signOut error: $e');
-              }
-
-              if (!mounted) return;
-
-              navigator.pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-                (route) => false,
-              );
-            },
+            onPressed: _handleLogout,
           )
         ],
       ),
@@ -423,15 +494,13 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
                   await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
                   if (!mounted) return;
 
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PaymentScreen(
-                        fuelType: fuelType,
-                        amount: amount,
-                      ),
-                    ),
-                  );
+                  // TTS가 끝난 후 isSpeaking 상태를 false로 변경하여 버튼을 다시 활성화합니다.
+                  // pushReplacement 이후에 setState를 호출하면 에러가 발생할 수 있으므로,
+                  // 네비게이션 전에 상태를 변경하거나, 네비게이션 후 돌아올 화면에서 상태를 관리해야 합니다.
+                  // 여기서는 네비게이션 직전에 상태를 변경합니다.
+                  setState(() => _isSpeaking = false);
+
+                  _navigateToPayment();
                 },
           style: ElevatedButton.styleFrom(
             backgroundColor: tossBlue,
@@ -502,7 +571,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              _recognizedWords.isNotEmpty ? _recognizedWords : '버튼을 누르고 말씀해주세요.',
+              _recognizedWords.isNotEmpty ? _recognizedWords : '음성으로 주유 설정을 해보세요.',
               style: TextStyle(fontSize: 16, color: textColor),
             ),
           ),
