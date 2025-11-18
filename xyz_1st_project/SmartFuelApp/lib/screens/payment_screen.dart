@@ -36,7 +36,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _initTts();
     _initStt().then((_) {
       // STT 초기화 후, 화면이 완전히 빌드된 다음 음성 안내 및 인식 시작
-      WidgetsBinding.instance.addPostFrameCallback((_) => _speakAndListen());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _speakAndListen('결제 수단을 말씀해주세요.'));
     });
 
     for (int i = 0; i < 5; i++) {
@@ -51,14 +51,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _initStt() async {
     await _speechToText.initialize(
-      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
+      onError: (error) {
+        debugPrint('STT Error: ${error.errorMsg}');
+        if (mounted) {
+          setState(() {
+            _recognizedWords = '음성 인식 오류가 발생했습니다.';
+            _isListening = false;
+          });
+        }
+      },
+      onStatus: (status) {}, // UI 깜빡임 방지를 위해 onStatus에서 상태 변경 안 함
     );
   }
 
-  Future<void> _speakAndListen() async {
+  /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
+  Future<void> _speakAndListen(String text) async {
     if (!mounted) return;
-    await _flutterTts.speak('결제 수단을 말씀해주세요.');
-    _startListening();
+    setState(() => _recognizedWords = text); // 화면에 현재 상태 표시
+    await _flutterTts.speak(text);
+    if (mounted) _startListening();
   }
 
   void _toggleListening() {
@@ -83,7 +94,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           }
         },
         localeId: 'ko_KR',
-        listenFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 3), // 3초로 설정
       );
     }
 
@@ -151,6 +162,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       if (method == '신용카드') {
         if (index != null && index >= 0 && index < _cardNumbers.length) {
+          // LLM이 반환한 인덱스로 카드 선택
+          _selectedCardIndex = index;
           displayText = '신용카드 ${index + 1}';
         } else {
           // '신용카드'라고만 말한 경우, 첫 번째 카드를 기본으로 선택
@@ -184,13 +197,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
         await _flutterTts.speak(confirmationQuestion);
         if (mounted) _startListening();
       }
+    } on ApiException catch (e) {
+      debugPrint('LLM API 오류: $e');
+      const errorMessage = '서버에 일시적인 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
+      if (mounted) await _speakAndListen(errorMessage);
     } catch (e) {
       debugPrint('LLM 결제수단 분석 오류: $e');
-      const errorMessage = '결제 수단을 이해하지 못했어요. 다시 말씀해주세요.';
-      setState(() => _recognizedWords = errorMessage);
-      await _flutterTts.speak(errorMessage);
-      // 오류 안내 후 다시 듣기 시작
-      if (mounted) _startListening();
+      const errorMessage = '죄송해요, 잘 이해하지 못했어요. 다시 말씀해주시겠어요?';
+      if (mounted) await _speakAndListen(errorMessage);
     }
   }
 

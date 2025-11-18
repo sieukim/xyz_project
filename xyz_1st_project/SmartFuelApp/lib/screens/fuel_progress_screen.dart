@@ -78,7 +78,16 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
 
   Future<void> _initStt() async {
     await _speechToText.initialize(
-      onStatus: (status) {}, // 상태 변경을 여기서 직접 처리하지 않음
+      onError: (error) {
+        debugPrint('STT Error: ${error.errorMsg}');
+        if (mounted) {
+          setState(() {
+            _voiceCommandStatusText = '음성 인식 오류가 발생했습니다.';
+            _isListening = false;
+          });
+        }
+      },
+      onStatus: (status) {}, // UI 깜빡임 방지를 위해 onStatus에서 상태 변경 안 함
     );
   }
 
@@ -104,13 +113,21 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
         }
       },
       localeId: 'ko_KR',
-      listenFor: const Duration(seconds: 2), // 2초로 수정
+      listenFor: const Duration(seconds: 3), // 3초로 수정
     );
   }
 
   void _stopListening() {
     _speechToText.stop();
     if (mounted) setState(() => _isListening = false);
+  }
+
+  /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
+  Future<void> _speakAndListen(String text) async {
+    if (!mounted) return;
+    setState(() => _voiceCommandStatusText = text); // 화면에 현재 상태 표시
+    await _flutterTts.speak(text);
+    if (mounted) _startListening();
   }
 
   Future<void> _processVoiceCommand(String command) async {
@@ -173,16 +190,18 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
       }
       // 2. UI가 실제로 렌더링된 다음 TTS 실행
       await _flutterTts.speak(responseText);
+
+      // 3. 사용자가 대화를 거절하지 않았다면, 다시 듣기를 시작하여 대화를 이어갑니다.
+      if (mounted && _voiceFeatureActive) _startListening();
+
+    } on ApiException catch (e) {
+      debugPrint('LLM API 오류: $e');
+      const errorMessage = '서버에 일시적인 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
+      await _speakAndListen(errorMessage);
     } catch (e) {
       debugPrint('LLM 의도 분석 오류: $e');
-      // API 오류 발생 시 사용자에게 피드백 제공
-      const String errorMessage = 'AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해주세요.';
-      await _flutterTts.speak(errorMessage);
-      if (mounted) {
-        setState(() {
-          _voiceCommandStatusText = errorMessage;
-        });
-      }
+      const errorMessage = '죄송해요, 잘 이해하지 못했어요. 다시 말씀해주시겠어요?';
+      await _speakAndListen(errorMessage);
     }
   }
 

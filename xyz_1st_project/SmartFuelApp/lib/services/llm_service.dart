@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
+/// LLM API 관련 예외를 처리하기 위한 사용자 정의 클래스
+class ApiException implements Exception {}
+
 class LlmService {
   static String get _apiKey => AppConfig.geminiApiKey;
   static String get _modelEndpoint =>
@@ -37,14 +40,14 @@ class LlmService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('API 요청 실패 (상태 코드: ${response.statusCode}): ${response.body}');
+      throw ApiException(); // 서버 오류 시 ApiException 발생
     }
 
     final responseBody = jsonDecode(utf8.decode(response.bodyBytes));
 
     if (responseBody['candidates'] == null || (responseBody['candidates'] as List).isEmpty) {
       final error = responseBody['error'];
-      if (error != null) throw Exception('API 오류: ${error['message']}');
+      if (error != null) throw ApiException(); // API 오류 시 ApiException 발생
       throw Exception('API로부터 유효한 응답을 받지 못했습니다.');
     }
 

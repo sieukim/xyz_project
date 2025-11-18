@@ -131,12 +131,6 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
       },
       onStatus: (status) {
         debugPrint('STT Status: $status');
-        // 리스닝이 멈췄고(notListening), 다른 음성 작업(TTS, LLM 분석) 중이 아닐 때
-        // 자동으로 다시 리스닝을 시작하여 대화 흐름을 유지합니다.
-        if (status == 'notListening' && mounted && !_isSpeaking && _recognizedWords != '분석 중...') {
-          // 리스닝이 멈췄고, 다른 작업 중이 아닐 때 다시 시작
-          _startListening();
-        }
       },
     );
   }
@@ -185,7 +179,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           _processVoiceCommand(result.recognizedWords);
         }
       },
-      listenFor: const Duration(seconds: 2),
+      listenFor: const Duration(seconds: 3),
       localeId: 'ko_KR',
       // onStatus 콜백은 initialize 메소드에서 전역적으로 처리합니다.
     );
@@ -270,17 +264,19 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         if (extractedFuelType != null && ['휘발유', '경유', '전기'].contains(extractedFuelType)) {
           fuelType = extractedFuelType;
         }
-        String amountForDisplay = '';
+        String amountForDisplay;
         if (extractedAmount != null) {
           if (extractedAmount == -1) {
             amount = maxAmount;
             selectedPreset = maxAmount;
             amountForDisplay = '가득';
-          } else if (_presets.contains(extractedAmount)) {
+          } else {
             amount = extractedAmount;
             selectedPreset = extractedAmount;
             amountForDisplay = '${_formatCurrency(extractedAmount)}원';
           }
+        } else {
+          amountForDisplay = selectedPreset == maxAmount ? '가득' : '${_formatCurrency(amount)}원';
         }
 
         final correctedFuel = extractedFuelType ?? fuelType;
@@ -302,9 +298,14 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
           await _speakAndListen('금액을 말씀해주세요.');
         }
       }
+    } on ApiException catch (e) {
+      debugPrint('LLM API 오류: $e');
+      const errorMessage = '서버에 일시적인 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
+      await _speakAndListen(errorMessage);
     } catch (e) {
       debugPrint('LLM 처리 오류: $e');
-      await _speakAndListen('오류가 발생했습니다. 다시 시도해주세요.');
+      const errorMessage = '죄송해요, 잘 이해하지 못했어요. 다시 말씀해주시겠어요?';
+      await _speakAndListen(errorMessage);
     }
   }
 
