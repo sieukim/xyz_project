@@ -32,6 +32,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
   String _voiceCommandStatusText = '주유 중 궁금한 점을 말씀해주세요.';
   bool _isSpeaking = false;
 
+  bool _voiceFeatureActive = true; // 음성 기능 활성화 여부
   Timer? _timer;
   String _status = '대기 중';
   int _progress = 0;
@@ -48,28 +49,31 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
     super.initState();
     // 탭 컨트롤러 초기화
     _tabController = TabController(length: 2, vsync: this);
-    _initTtsAndSpeak();
-    _initStt();
-    _extractIpAndStartPolling();
+    _initializeScreen();
   }
 
-  Future<void> _initTtsAndSpeak() async {
+  Future<void> _initializeScreen() async {
+    await _initTts();
+    await _initStt();
+    _extractIpAndStartPolling();
+    // 화면 빌드 후 초기 대화 시작
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startInitialConversation());
+  }
+
+  Future<void> _initTts() async {
     await _flutterTts.setLanguage('ko-KR');
     await _flutterTts.setSpeechRate(1.0);
-    // speak 함수가 즉시 반환되도록 awaitSpeakCompletion 설정을 false로 변경합니다.
-    await _flutterTts.awaitSpeakCompletion(false);
+    await _flutterTts.awaitSpeakCompletion(true);
+  }
 
-    // 음성 출력 시작/종료 시 _isSpeaking 상태를 업데이트하여 UI를 제어합니다.
-    _flutterTts.setStartHandler(() {
-      if (mounted) setState(() => _isSpeaking = true);
-    });
-    _flutterTts.setCompletionHandler(() {
-      if (mounted) setState(() => _isSpeaking = false);
-    });
-    _flutterTts.setErrorHandler((msg) {
-      if (mounted) setState(() => _isSpeaking = false);
-    });
+  Future<void> _startInitialConversation() async {
+    if (!mounted) return;
     await _flutterTts.speak("주유중입니다.");
+    await _flutterTts.speak("도움이 필요하신게 있으신가요?");
+    if (mounted) {
+      setState(() => _voiceCommandStatusText = '도움이 필요하신게 있으신가요?');
+      _startListening();
+    }
   }
 
   Future<void> _initStt() async {
@@ -79,7 +83,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
   }
 
   void _toggleListening() {
-    if (!_speechToText.isAvailable || _completed || _isFinishingSoon) return;
+    if (!_speechToText.isAvailable || _completed || _isFinishingSoon || !_voiceFeatureActive) return;
     if (_isListening) {
       _stopListening();
     } else {
@@ -100,7 +104,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
         }
       },
       localeId: 'ko_KR',
-      listenFor: const Duration(seconds: 5), // 5초 후 자동으로 듣기 종료
+      listenFor: const Duration(seconds: 2), // 2초로 수정
     );
   }
 
@@ -117,67 +121,48 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
       _isListening = false;
     });
 
+    final totalDuration = AppConfig.totalFuelingSeconds;
+    final remainingSeconds = (totalDuration * (100 - _progress) / 100.0).round();
+
     final prompt = """
-        사용자의 질문 의도를 다음 중 하나로 분류하고 JSON 형식으로 반환해줘.
-        사용 가능한 의도: 'progress_query', 'time_query', 'hungry_query', 'wipe_query', 'thirsty_query', 'news_query', 'weather_query', 'joke_query', 'music_query', 'book_query', 'movie_query', 'restaurant_query', 'travel_query', 'health_query', 'tech_query', 'finance_query', 'etc'.
-    
-        - 'progress_query': 주유 진행률(%)을 묻는 질문. (예: "얼마나 됐어?", "진행률 알려줘")
-        - 'time_query': 남은 시간을 묻는 질문. (예: "몇 초 남았어?", "언제 끝나?")
-        - 'hungry_query': 배고픔과 관련된 표현. (예: "배고파", "출출한데", "뭐 먹을 거 없어?")
-        - 'wipe_query': 무언가 닦을 것이 필요하다는 표현. (예: "뭐 닦아야 하는데", "휴지 좀")
-        - 'thirsty_query': 목마름과 관련된 표현. (예: "목말라", "마실 것 좀 줘")
-        - 'news_query', 'weather_query', 'joke_query', 'music_query', 'book_query', 'movie_query', 'restaurant_query', 'travel_query', 'health_query', 'tech_query', 'finance_query': 일반적인 정보성 질문.
-        - 'etc': 위 분류에 해당하지 않는 모든 경우.
-    
-        결과 예시: {"intent": "time_query"}
-    
-        사용자 질문: "$command"
-        """;
+    당신은 주유 중인 운전자를 돕는 친절한 AI 비서입니다. 사용자의 질문에 대해 JSON 형식으로 답변을 생성해주세요.
+
+    ### 현재 주유 상태 (내부 정보):
+    - 진행률: $_progress%
+    - 남은 시간: $remainingSeconds초
+
+    ### 지침:
+    1.  사용자의 질문 의도를 파악하세요.
+    2.  '진행률'이나 '남은 시간'에 대한 질문이라면, 위 내부 정보를 활용하여 자연스러운 한 문장으로 답변을 생성하세요.
+    3.  사용자가 도움이 필요 없다고 말하면(예: "아니", "없어", "괜찮아"), 'intent' 필드에 'no_help_needed'를 포함시키세요.
+    4.  그 외 모든 질문(날씨, 농담, 일반 상식 등)에 대해서도 사용자를 즐겁게 할 수 있는 간결하고 친절한 답변을 생성하세요.
+    5.  생성된 답변은 'response' 필드에 담아 JSON으로 반환하세요.
+
+    ### 예시:
+    - 사용자 질문: "얼마나 됐어?"
+      -> {"response": "네, 현재 $_progress% 진행되었습니다. 거의 다 되어가네요!"}
+    - 사용자 질문: "아니 괜찮아"
+      -> {"intent": "no_help_needed", "response": "네, 알겠습니다. 편하게 기다려주세요."}
+    - 사용자 질문: "오늘 날씨 어때?"
+      -> {"response": "오늘 날씨는 화창해서 주유 후에 드라이브하기 딱 좋은 날씨입니다!"}
+    - 사용자 질문: "재미있는 얘기 해줘."
+      -> {"response": "기름을 너무 많이 먹는 공룡 이름은 뭘까요? 바로 '기름이모자우루스'입니다!"}
+
+    ### 사용자 질문:
+    "$command"
+    """;
 
  try {
       final result = await LlmService.generateContent(prompt);
-      final intent = result['intent'] as String? ?? 'etc';
-      String responseText;
+      final responseText = result['response'] as String?;
+      final intent = result['intent'] as String?;
 
-      switch (intent) {
-        case 'progress_query':
-          final remainingPercent = 100 - _progress;
-          responseText = "현재 $_progress% 완료, 약 $remainingPercent% 남았습니다.";
-          break;
-        case 'time_query':
-          final totalDuration = AppConfig.totalFuelingSeconds;
-          final remainingSeconds = (totalDuration * (100 - _progress) / 100.0).round();
-          responseText = "약 $remainingSeconds초 남았습니다.";
-          break;
-        case 'hungry_query':
-          responseText = "간식을 가져다드리겠습니다. (약 30초 소요)";
-          break;
-        case 'wipe_query':
-          responseText = "휴지를 가져다드리겠습니다. (약 10초 소요)";
-          break;
-        case 'thirsty_query':
-          responseText = "물을 가져다드리겠습니다. (약 20초 소요)";
-          break;
-        case 'news_query':
-        case 'weather_query':
-        case 'joke_query':
-        case 'music_query':
-        case 'book_query':
-        case 'movie_query':
-        case 'restaurant_query':
-        case 'travel_query':
-        case 'health_query':
-        case 'tech_query':
-        case 'finance_query':
-        default:
-          // LLM을 사용하여 자연스러운 답변 생성
-          final responsePrompt = """
-          당신은 주유 중인 운전자를 돕는 친절한 AI 비서입니다.
-          사용자의 질문에 대해 간결하고 친절한 한 문장으로 답변해주세요.
-          
-          사용자 질문: "$command"
-          """;
-          responseText = await LlmService.generateTextOnly(responsePrompt);
+      if (intent == 'no_help_needed') {
+        setState(() => _voiceFeatureActive = false);
+      }
+      
+      if (responseText == null || responseText.isEmpty) {
+        throw Exception('LLM이 유효한 답변을 생성하지 못했습니다.');
       }
 
       // 1. 화면의 텍스트를 먼저 업데이트합니다.
@@ -200,9 +185,6 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
       }
     }
   }
-
-  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
-  bool get _isVoiceProcessing => _isListening || _voiceCommandStatusText == '분석 중...' || _isSpeaking;
 
   void _extractIpAndStartPolling() {
     try {
@@ -229,6 +211,9 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
     _flutterTts.stop();
     super.dispose();
   }
+
+  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
+  bool get _isVoiceProcessing => _isListening || _voiceCommandStatusText == '분석 중...' || _isSpeaking;
 
   Future<void> _fetchStatus() async {
     if (_serverIp == null) {
@@ -413,10 +398,10 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
                   children: [
                     IconButton(
                       icon: Icon(
-                        _isVoiceProcessing || _isFinishingSoon ? Icons.mic_off : Icons.mic,
-                        color: _isVoiceProcessing || _isFinishingSoon ? Colors.grey : darkGrayText,
+                        !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? Icons.mic_off : Icons.mic,
+                        color: !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? Colors.grey : darkGrayText,
                       ),
-                      onPressed: _isVoiceProcessing || _isFinishingSoon ? null : _toggleListening,
+                      onPressed: !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? null : _toggleListening,
                       tooltip: '궁금한 점을 질문하세요',
                     ),
                     const SizedBox(width: 8),
