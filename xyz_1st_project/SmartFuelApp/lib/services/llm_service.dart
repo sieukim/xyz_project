@@ -4,7 +4,13 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
 /// LLM API 통신 중 발생하는 예외
-class ApiException implements Exception {}
+class ApiException implements Exception {
+  final String message;
+  ApiException(this.message);
+
+  @override
+  String toString() => 'ApiException: $message';
+}
 
 /// Gemini LLM API와 통신하여 콘텐츠를 생성하고 결과를 파싱하는 서비스
 class LlmService {
@@ -36,14 +42,16 @@ class LlmService {
     );
 
     if (response.statusCode != 200) {
-      throw ApiException(); 
+      throw ApiException('API 요청 실패 (상태 코드: ${response.statusCode}): ${response.body}');
     }
 
     final responseBody = jsonDecode(utf8.decode(response.bodyBytes));
 
     if (responseBody['candidates'] == null || (responseBody['candidates'] as List).isEmpty) {
       final error = responseBody['error'];
-      if (error != null) throw ApiException(); 
+      if (error != null) {
+        throw ApiException('API가 오류를 반환했습니다: ${error['message']}');
+      }
       throw Exception('API로부터 유효한 응답을 받지 못했습니다.');
     }
 
