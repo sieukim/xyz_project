@@ -347,9 +347,8 @@ class _FuelSelectionScreenState extends State<_FuelSelectionScreenContent>
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Consumer<VoiceInteractionService>(
-          builder: (context, voiceService, child) => ElevatedButton(onPressed: (selectedPreset == null || voiceService.isProcessing)
-              ? null
-              : () async {
+          builder: (context, voiceService, child) => ElevatedButton(
+            onPressed: selectedPreset == null ? null : () async {
                   final String speakAmount =
                       amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
 
@@ -421,14 +420,12 @@ class _FuelSelectionScreenState extends State<_FuelSelectionScreenContent>
 
         return Expanded(
           child: GestureDetector(
-            onTap: Provider.of<VoiceInteractionService>(context).isProcessing
-                ? null
-                : () {
-                    setState(() {
-                      fuelType = type;
-                      Provider.of<VoiceInteractionService>(context, listen: false).deactivateOnManualSelection();
-                    });
-                  },
+            onTap: () {
+              setState(() {
+                fuelType = type;
+                Provider.of<VoiceInteractionService>(context, listen: false).stopAndDeactivate();
+              });
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -469,15 +466,13 @@ class _FuelSelectionScreenState extends State<_FuelSelectionScreenContent>
         final label = preset == maxAmount ? '가득' : '${preset ~/ 10000}만원';
 
         return GestureDetector(
-          onTap: Provider.of<VoiceInteractionService>(context).isProcessing
-              ? null
-              : () {
-                  setState(() {
-                    selectedPreset = preset;
-                    amount = preset;
-                    Provider.of<VoiceInteractionService>(context, listen: false).deactivateOnManualSelection();
-                  });
-                },
+          onTap: () {
+            setState(() {
+              selectedPreset = preset;
+              amount = preset;
+              Provider.of<VoiceInteractionService>(context, listen: false).stopAndDeactivate();
+            });
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(

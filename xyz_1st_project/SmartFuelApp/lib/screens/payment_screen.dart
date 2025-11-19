@@ -289,14 +289,13 @@ class _PaymentScreenState extends State<_PaymentScreenContent> {
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: 5,
-        itemBuilder: (context, index) {
-          final voiceService = Provider.of<VoiceInteractionService>(context);
+        itemBuilder: (context, index) {          
           return GestureDetector(
-            onTap: voiceService.isProcessing ? null : () {
+            onTap: () {
               setState(() {
                 _selectedCardIndex = index;
                 _selectedPaymentMethod = '신용카드';
-                voiceService.deactivateOnManualSelection();
+                Provider.of<VoiceInteractionService>(context, listen: false).stopAndDeactivate();
               });
             },
             child: _buildCardItem(index),
@@ -320,15 +319,14 @@ class _PaymentScreenState extends State<_PaymentScreenContent> {
         final bgColor = entry.value['bg']!;
         final textColor = entry.value['text']!;
         final isSelected = _selectedPaymentMethod == methodName;
-        final voiceService = Provider.of<VoiceInteractionService>(context);
 
         return Expanded(
           child: GestureDetector(
-            onTap: voiceService.isProcessing ? null : () {
+            onTap: () {
               setState(() {
                 _selectedPaymentMethod = methodName;
                 _selectedCardIndex = -1; 
-                voiceService.deactivateOnManualSelection();
+                Provider.of<VoiceInteractionService>(context, listen: false).stopAndDeactivate();
               });
             },
             child: AnimatedContainer(
@@ -412,8 +410,8 @@ class _PaymentScreenState extends State<_PaymentScreenContent> {
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Consumer<VoiceInteractionService>(
-          builder: (context, voiceService, child) => ElevatedButton(
-          onPressed: isProcessing || voiceService.isProcessing ? null : simulatePayment,
+          builder: (context, _, child) => ElevatedButton(
+          onPressed: isProcessing ? null : simulatePayment,
           style: theme.elevatedButtonTheme.style,
           child: const Text('결제하기'),
         ),

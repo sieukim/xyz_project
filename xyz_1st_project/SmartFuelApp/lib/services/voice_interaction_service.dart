@@ -134,11 +134,19 @@ class VoiceInteractionService with ChangeNotifier {
 
   /// 사용자가 수동으로 UI를 조작했을 때 음성 기능 비활성화
   void deactivateOnManualSelection() {
-    if (_isFeatureActive) {
-      _isFeatureActive = false;
-      speak("수동으로 선택하셨네요.");
-      _updateState(VoiceState.idle, text: '음성 기능이 비활성화되었습니다.');
-    }
+    // 이미 비활성화 상태이면 아무것도 하지 않음
+    if (!_isFeatureActive) return;
+
+    _isFeatureActive = false;
+    // 진행 중인 음성을 중지하고 상태를 업데이트합니다.
+    _flutterTts.stop();
+    _updateState(VoiceState.idle, text: '음성 기능이 비활성화되었습니다.');
+  }
+
+  /// 음성을 즉시 중지하고 음성 기능을 비활성화
+  void stopAndDeactivate() {
+    if (!_isFeatureActive) return;
+    deactivateOnManualSelection();
   }
 
   /// 음성 명령 처리가 완료되었음을 알리고 결과 텍스트 표시

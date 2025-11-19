@@ -113,7 +113,7 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     if (!mounted) return;
 
     if (action.stateUpdate['deactivate_voice'] == true) {
-      _voiceService.deactivateFeature(action.speakText ?? "네, 알겠습니다.");
+      _voiceService.stopAndDeactivate();
       return;
     }
 
