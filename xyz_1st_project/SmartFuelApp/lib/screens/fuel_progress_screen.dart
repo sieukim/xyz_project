@@ -192,7 +192,9 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
       await _flutterTts.speak(responseText);
 
       // 3. 사용자가 대화를 거절하지 않았다면, 다시 듣기를 시작하여 대화를 이어갑니다.
-      if (mounted && _voiceFeatureActive) _startListening();
+      if (mounted && _voiceFeatureActive) {
+        _startListening();
+      }
 
     } on ApiException catch (e) {
       debugPrint('LLM API 오류: $e');
@@ -379,12 +381,12 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _completed ? '주유 완료!' : '주유 중입니다...',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: darkGrayText),
+                    _completed ? '주유가 완료되었습니다!' : '주유 중입니다...',
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: darkGrayText),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '주문 ID: ${widget.orderId}',
+                    '주문 ID: ${widget.orderId}', 
                     style: const TextStyle(fontSize: 14, color: lightGrayText),
                   ),
                   const SizedBox(height: 20),
@@ -427,7 +429,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
                     Expanded(
                       child: Text(
                         _voiceCommandStatusText,
-                        style: TextStyle(fontSize: 16, color: _isFinishingSoon ? Colors.grey : lightGrayText),
+                        style: TextStyle(fontSize: 16, color: _isFinishingSoon ? Colors.grey : darkGrayText, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],

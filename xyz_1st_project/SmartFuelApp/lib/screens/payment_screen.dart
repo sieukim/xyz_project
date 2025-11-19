@@ -30,6 +30,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   final List<String> _cardNumbers = [];
   bool _isAwaitingConfirmation = false; // 결제 확인 대기 상태
 
+  bool _voiceFeatureActive = true; // 음성 기능 활성화 여부
   @override
   void initState() {
     super.initState();
@@ -124,6 +125,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     - 카드 색상과 인덱스 매칭: '회색'/'검정색' -> 0, '파란색'/'하늘색'-> 1, '주황색'/'분홍색' -> 2, '초록색'/'노란색' -> 3, '보라색' -> 4.
     - 사용자가 '결제', '해줘', '할게' 등 결제를 실행하려는 의도를 보이면 "performPayment": true 를 포함해줘.
     - 사용자가 "응", "네", "맞아" 등 긍정적인 답변을 하면 "confirmation": "positive" 를 포함해줘.
+    - 사용자가 "괜찮아", "내가 할게" 등 직접 조작 의사를 보이면 "intent": "no_help_needed" 를 포함해줘.
     - 결과는 반드시 JSON 형식으로 반환해줘.
     - 예시 1: "카카오페이" -> {"paymentMethod": "카카오페이"}
     - 예시 2: "세 번째 카드로 할게" -> {"paymentMethod": "신용카드", "cardIndex": 2, "performPayment": true}
@@ -141,7 +143,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final index = result['cardIndex'] as int?;
       final shouldPay = result['performPayment'] == true;
       final confirmation = result['confirmation'] as String?;
+      final intent = result['intent'] as String?;
 
+      // 0. 사용자가 음성 도움을 거절한 경우
+      if (intent == 'no_help_needed') {
+        setState(() {
+          _voiceFeatureActive = false;
+          // 상태 텍스트를 변경하여 '분석 중...'에서 벗어납니다.
+          _recognizedWords = '음성 기능이 비활성화되었습니다.';
+        });
+        await _flutterTts.speak("네, 직접 선택해주세요.");
+        return; // ★★★ 함수를 즉시 종료합니다.
+      }
       // 1. 결제 확인 대기 상태에서 긍정 답변을 받았을 경우
       if (_isAwaitingConfirmation && confirmation == 'positive') {
         setState(() => _isAwaitingConfirmation = false);
@@ -331,14 +344,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
         itemCount: 5,
         itemBuilder: (context, index) {
           return GestureDetector(
-            onTap: _isVoiceProcessing
-                ? null
-                : () {
-                    setState(() {
-                      _selectedCardIndex = index;
-                      _selectedPaymentMethod = '신용카드';
-                    });
-                  },
+            onTap: _isVoiceProcessing ? null : () {
+              setState(() {
+                _selectedCardIndex = index;
+                _selectedPaymentMethod = '신용카드';
+                if (_voiceFeatureActive) _voiceFeatureActive = false;
+              });
+            },
             child: _buildCardItem(index),
           );
         },
@@ -362,14 +374,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
         return Expanded(
           child: GestureDetector(
-            onTap: _isVoiceProcessing
-                ? null
-                : () {
-                    setState(() {
-                      _selectedPaymentMethod = methodName;
-                      _selectedCardIndex = -1; // Deselect card
-                    });
-                  },
+            onTap: _isVoiceProcessing ? null : () {
+              setState(() {
+                _selectedPaymentMethod = methodName;
+                _selectedCardIndex = -1; // Deselect card
+                if (_voiceFeatureActive) _voiceFeatureActive = false;
+              });
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               height: 60,
@@ -383,7 +394,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 child: Text(
                   methodName,
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                     color: textColor,
                   ),
@@ -404,7 +415,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     const white = Colors.white;
 
     return Scaffold(
-      backgroundColor: white,
+      backgroundColor: white, 
       appBar: AppBar(
         title: const Text('결제', style: TextStyle(color: darkGrayText)),
         backgroundColor: white,
@@ -425,14 +436,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   Text(
                     '${widget.amount}원',
                     style: const TextStyle(
-                      fontSize: 32,
+                      fontSize: 34,
                       fontWeight: FontWeight.bold,
                       color: darkGrayText,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${widget.fuelType} 주유를 진행합니다.',
+                    '${widget.fuelType} 주유를 진행합니다.', 
                     style: const TextStyle(
                       fontSize: 20,
                       color: lightGrayText,
@@ -449,17 +460,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       children: [
                         IconButton(
                           icon: Icon(
-                            _isVoiceProcessing ? Icons.mic_off : Icons.mic,
-                            color: _isVoiceProcessing ? Colors.grey : darkGrayText,
+                          !_voiceFeatureActive || _isVoiceProcessing ? Icons.mic_off : Icons.mic,
+                          color: !_voiceFeatureActive || _isVoiceProcessing ? Colors.grey : darkGrayText,
                           ),
-                          onPressed: isProcessing || _isVoiceProcessing ? null : _toggleListening,
+                        onPressed:
+                            !_voiceFeatureActive || isProcessing || _isVoiceProcessing ? null : _toggleListening,
                           tooltip: '음성으로 결제수단 선택',
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _recognizedWords.isNotEmpty ? _recognizedWords : '결제 수단을 말씀해주세요.',
-                            style: const TextStyle(fontSize: 16, color: darkGrayText),
+                            style: const TextStyle(fontSize: 16, color: darkGrayText, fontWeight: FontWeight.w600),
                           ),
                         ),
                       ],

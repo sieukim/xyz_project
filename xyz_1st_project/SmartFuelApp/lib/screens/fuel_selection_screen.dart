@@ -50,6 +50,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
   // 대화 상태를 추적하는 변수
   ConversationContext _conversationContext = ConversationContext.none;
+  bool _voiceFeatureActive = true; // 음성 기능 활성화 여부
 
   @override
   void initState() {
@@ -221,10 +222,11 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
        - 'amount': 만원 단위 숫자(예: 50000). '가득'은 -1로 설정.
     
     2. **의도 파악**:
-       - 'intent': 사용자의 핵심 의도. 'order' (주문), 'payment' (결제 요청), 'confirmation_positive' (긍정), 'confirmation_negative' (부정) 중 하나.
+       - 'intent': 사용자의 핵심 의도. 'order' (주문), 'payment' (결제 요청), 'confirmation_positive' (긍정), 'confirmation_negative' (부정), 'no_help_needed' (도움 거절) 중 하나.
          - "결제해줘", "결제할게" -> 'payment'
          - "응", "네", "맞아" -> 'confirmation_positive'
          - "아니", "아니요" -> 'confirmation_negative'
+         - "괜찮아", "내가 할게" 등 사용자가 직접 조작하려는 의도 -> 'no_help_needed'
          - 그 외 주유 관련 언급 -> 'order'
     
     **규칙**:
@@ -246,6 +248,17 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
       final extractedFuelType = result['fuelType'] as String?;
       final extractedAmount = result['amount'] as int?;
+
+      // 0. 사용자가 음성 도움을 거절한 경우
+      if (intent == 'no_help_needed') {
+        setState(() {
+          _voiceFeatureActive = false;
+          // 상태 텍스트를 변경하여 '분석 중...'에서 벗어납니다.
+          _recognizedWords = '음성 기능이 비활성화되었습니다.';
+        });
+        await _flutterTts.speak("네, 직접 선택해주세요."); // TTS 안내
+        return; // ★★★ 함수를 즉시 종료합니다.
+      }
 
       // 1. 최종 결제 확인에 대한 응답 처리 ("~로 결제할까요?" 다음)
       if (_conversationContext == ConversationContext.awaitingFinalConfirmation) {
@@ -328,7 +341,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
     );
   }
 
-  bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
+  bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...' || _isSpeaking;
 
   /// 공통 로그아웃 로직
   Future<void> _handleLogout() async {
@@ -487,12 +500,7 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
                   final String speakAmount =
                       amount == maxAmount ? '가득' : '${_formatCurrency(amount)} 원';
 
-                  await _flutterTts.setSpeechRate(1.5);
-                  for (String num in _carNumber.replaceAll(RegExp(r'[^0-9]'), '').split('')) {
-                    await _flutterTts.speak(num);
-                  }
-                  await _flutterTts.setSpeechRate(1.0);
-                  await _flutterTts.speak('고객님, $fuelType, $speakAmount 결제하겠습니다.');
+                  await _flutterTts.speak('$fuelType, $speakAmount 결제하겠습니다.');
                   if (!mounted) return;
 
                   // TTS가 끝난 후 isSpeaking 상태를 false로 변경하여 버튼을 다시 활성화합니다.
@@ -563,17 +571,17 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         children: [
           IconButton(
             icon: Icon(
-              _isVoiceProcessing ? Icons.mic_off : Icons.mic,
-              color: _isVoiceProcessing ? Colors.grey : textColor,
+              !_voiceFeatureActive || _isVoiceProcessing ? Icons.mic_off : Icons.mic,
+              color: !_voiceFeatureActive || _isVoiceProcessing ? Colors.grey : textColor,
             ),
-            onPressed: _isVoiceProcessing ? null : _toggleListening,
+            onPressed: !_voiceFeatureActive || _isVoiceProcessing ? null : _toggleListening,
             tooltip: '음성으로 주문',
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               _recognizedWords.isNotEmpty ? _recognizedWords : '음성으로 주유 설정을 해보세요.',
-              style: TextStyle(fontSize: 16, color: textColor),
+              style: TextStyle(fontSize: 16, color: textColor, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -596,7 +604,12 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
 
         return Expanded(
           child: GestureDetector(
-            onTap: _isVoiceProcessing ? null : () => setState(() => fuelType = type),
+            onTap: _isVoiceProcessing ? null : () {
+              setState(() {
+                fuelType = type;
+                if (_voiceFeatureActive) _voiceFeatureActive = false;
+              });
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -636,14 +649,13 @@ class _FuelSelectionScreenState extends State<FuelSelectionScreen>
         final label = preset == maxAmount ? '가득' : '${preset ~/ 10000}만원';
 
         return GestureDetector(
-          onTap: _isVoiceProcessing
-              ? null
-              : () {
-                  setState(() {
-                    selectedPreset = preset;
-                    amount = preset;
-                  });
-                },
+          onTap: _isVoiceProcessing ? null : () {
+            setState(() {
+              selectedPreset = preset;
+              amount = preset;
+              if (_voiceFeatureActive) _voiceFeatureActive = false;
+            });
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(
