@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -12,7 +11,9 @@ import 'package:smart_fuel/services/llm_service.dart';
 import 'package:smart_fuel/widgets/voice_command_bar.dart';
 import 'package:smart_fuel/widgets/webcam_view.dart';
 import 'package:smart_fuel/screens/fuel_selection_screen.dart';
+import 'package:smart_fuel/theme/app_theme.dart';
 
+/// 주유 진행 상태를 보여주는 화면
 class FuelProgressScreen extends StatefulWidget {
   final String orderId;
   final String rosBaseUrl;
@@ -25,7 +26,7 @@ class FuelProgressScreen extends StatefulWidget {
   State<FuelProgressScreen> createState() => _FuelProgressScreenStateWrapper();
 }
 
-/// ChangeNotifierProvider를 사용하기 위한 Wrapper 클래스
+/// VoiceInteractionService를 하위 위젯에 제공하기 위한 래퍼
 class _FuelProgressScreenStateWrapper extends State<FuelProgressScreen> {
   @override
   Widget build(BuildContext context) {
@@ -39,6 +40,7 @@ class _FuelProgressScreenStateWrapper extends State<FuelProgressScreen> {
   }
 }
 
+/// 주유 진행 화면의 실제 UI와 상태를 포함하는 위젯
 class _FuelProgressScreenContent extends StatefulWidget {
   final String orderId;
   final String rosBaseUrl;
@@ -49,6 +51,7 @@ class _FuelProgressScreenContent extends StatefulWidget {
   State<_FuelProgressScreenContent> createState() => _FuelProgressScreenState();
 }
 
+/// 주유 진행 화면의 상태 관리 로직 (서버 폴링, 음성 대화, UI 업데이트)
 class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     with SingleTickerProviderStateMixin {
   late VoiceInteractionService _voiceService;
@@ -57,36 +60,35 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
   int _progress = 0;
   bool _completed = false;
   int _countdown = 5;
-  bool _isFinishingSoon = false; // 주유 완료 임박 상태
+  bool _isFinishingSoon = false; 
   Timer? _countdownTimer;
-
   TabController? _tabController;
   String? _serverIp;
 
+  /// 위젯 초기화
   @override
   void initState() {
     super.initState();
-    // 탭 컨트롤러 초기화
     _voiceService = Provider.of<VoiceInteractionService>(context, listen: false);
     _tabController = TabController(length: 2, vsync: this);
     _initializeScreen();
   }
 
+  /// 화면에 필요한 서비스 초기화 및 폴링 시작
   Future<void> _initializeScreen() async {
     _voiceService.onResult = _processVoiceCommand;
     _extractIpAndStartPolling();
-    // 화면 빌드 후 초기 대화 시작
     WidgetsBinding.instance.addPostFrameCallback((_) => _startInitialConversation());
   }
 
+  /// 초기 음성 안내 시작
   Future<void> _startInitialConversation() async {
     if (!mounted) return;
     await _voiceService.speak("주유중입니다.");
     _voiceService.speakAndListen("도움이 필요하신게 있으신가요?");
   }
 
-  /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
-
+  /// 사용자 음성 명령 처리
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
 
@@ -106,6 +108,7 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     _handleConversationAction(action);
   }
 
+  /// 대화 분석 결과에 따른 액션 수행
   void _handleConversationAction(ConversationAction action) {
     if (!mounted) return;
 
@@ -123,6 +126,7 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     }
   }
 
+  /// 서버 URL에서 IP를 추출하고 상태 폴링 시작
   void _extractIpAndStartPolling() {
     try {
       final uri = Uri.parse(widget.rosBaseUrl);
@@ -140,6 +144,7 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     }
   }
 
+  /// 위젯 종료 시 타이머 정리
   @override
   void dispose() {
     _timer?.cancel();
@@ -147,13 +152,14 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     super.dispose();
   }
 
+  /// 서버로부터 주유 상태 주기적으로 조회
   Future<void> _fetchStatus() async {
     if (_serverIp == null) {
       debugPrint("Server IP not yet extracted, skipping poll.");
       return;
     }
 
-    final statusUrl = Uri.parse('http://$_serverIp:8000/status/${widget.orderId}');
+    final statusUrl = Uri.parse('http://$_serverIp:${AppConfig.rosApiPort}/status/${widget.orderId}');
 
     try {
       final res = await http.get(statusUrl).timeout(const Duration(seconds: 6));
@@ -176,11 +182,10 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
           }
         }
       }
-    } catch (e) {
-      // 네트워크 에러는 무시
-    }
+    } catch (e) { /* 네트워크 에러는 무시 */ }
   }
 
+  /// 주유 완료 시 처리 로직
   Future<void> _onCompleted() async {
     if (_completed) return;
     _timer?.cancel();
@@ -206,34 +211,26 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
     });
   }
 
+  /// 홈 화면(주유 설정)으로 이동
   void _navigateToHome() {
     if (mounted) {
       _countdownTimer?.cancel();
-      // 현재 화면이 스택의 첫 번째 화면이므로 popUntil이 동작하지 않습니다.
-      // 모든 이전 경로를 지우고 FuelSelectionScreen으로 이동합니다.
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const FuelSelectionScreen()),
-        (Route<dynamic> route) => false, // 모든 이전 라우트를 제거합니다.
+        (Route<dynamic> route) => false, 
       );
     }
   }
 
+  /// 화면 UI 구성
   @override
   Widget build(BuildContext context) {
-    const tossBlue = Color(0xFF3182F7);
-    const darkGrayText = Color(0xFF333D4B);
-    const lightGrayText = Color(0xFF6B7684);
-    const lightGrayBg = Color(0xFFF2F4F6);
-    const white = Colors.white;
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: white,
       appBar: AppBar(
-        title: const Text('주유 진행 상황', style: TextStyle(color: darkGrayText)),
-        backgroundColor: white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: darkGrayText),
+        title: const Text('주유 진행 상황'),
         automaticallyImplyLeading: false,
       ),
       body: Padding(
@@ -243,24 +240,22 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
             Expanded(
               flex: 5,
               child: _serverIp == null
-                  ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: tossBlue))
+                  ? Center(child: CircularProgressIndicator(strokeWidth: 2, color: theme.primaryColor))
                   : Card(
                       clipBehavior: Clip.antiAlias,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
-                      color: lightGrayBg,
+                      color: AppColors.surface,
                       child: Column(
                         children: [
                           Expanded(
                             child: TabBarView(
                               controller: _tabController,
                               children: [
-                                // 로봇 뷰 (RealSense)
                                 RealSenseViewWidget(
                                   serverIp: AppConfig.rosIp,
                                   streamPort: AppConfig.realsenseStreamerPort.toString(),
                                 ),
-                                // 차량 뷰 (Webcam)
                                 VideoViewWidget(
                                   serverIp: AppConfig.rosIp,
                                   streamPort: AppConfig.webcamStreamerPort.toString(),
@@ -270,11 +265,11 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
                           ),
                           TabBar(
                             controller: _tabController,
-                            labelColor: darkGrayText,
-                            unselectedLabelColor: lightGrayText,
-                            indicatorColor: tossBlue,
+                            labelColor: AppColors.textPrimary,
+                            unselectedLabelColor: AppColors.textSecondary,
+                            indicatorColor: theme.primaryColor,
                             indicatorWeight: 3.0,
-                            dividerColor: Colors.transparent, // 탭 하단 구분선 제거
+                            dividerColor: Colors.transparent,
                             tabs: const [Tab(text: '로봇 뷰'), Tab(text: '차량 뷰')],
                           ),
                         ],
@@ -285,7 +280,7 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: lightGrayBg,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
@@ -293,26 +288,27 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
                 children: [
                   Text(
                     _completed ? '주유가 완료되었습니다!' : '주유 중입니다...',
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: darkGrayText),
+                    style: theme.textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
                   Text(
                     '주문 ID: ${widget.orderId}', 
-                    style: const TextStyle(fontSize: 14, color: lightGrayText),
+                    style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 20),
                   LinearProgressIndicator(
                     value: _progress / 100.0,
                     minHeight: 10,
                     backgroundColor: Colors.grey[300],
-                    color: tossBlue,
+                    color: theme.primaryColor,
                   ),
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerRight,
                     child: Text(
                       '$_progress%',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkGrayText),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                   ),
                 ],
@@ -322,8 +318,8 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
             if (!_completed)
               VoiceCommandBar(
                 initialText: '주유 중 궁금한 점을 말씀해주세요.',
-                backgroundColor: lightGrayBg,
-                textColor: darkGrayText,
+                backgroundColor: AppColors.surface,
+                textColor: AppColors.textPrimary,
               ),
             if (_completed) const Spacer(),
           ],
@@ -333,18 +329,9 @@ class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
         padding: const EdgeInsets.all(20.0),
         child: ElevatedButton(
           onPressed: _completed ? _navigateToHome : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: tossBlue,
-            foregroundColor: white,
-            disabledBackgroundColor: lightGrayBg,
-            disabledForegroundColor: darkGrayText.withOpacity(0.38),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            elevation: 0,
-          ),
+          style: theme.elevatedButtonTheme.style,
           child: Text(
             _completed ? '$_countdown초 후 홈으로 이동' : '주유 중입니다',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
         ),
       ),

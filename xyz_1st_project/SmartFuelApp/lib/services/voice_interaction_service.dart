@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
-/// 음성 상호작용의 상태를 정의합니다.
+/// 음성 인식(STT)과 음성 합성(TTS)의 상태를 정의
 enum VoiceState { idle, listening, processing, speaking }
 
-/// STT, TTS 관련 로직을 캡슐화하고 UI에 상태 변경을 알리는 서비스 클래스입니다.
+/// STT, TTS 기능을 통합 관리하고 UI에 상태 변화를 알리는 서비스
 class VoiceInteractionService with ChangeNotifier {
   final FlutterTts _flutterTts = FlutterTts();
   final SpeechToText _speechToText = SpeechToText();
@@ -15,37 +15,40 @@ class VoiceInteractionService with ChangeNotifier {
   String _displayText = '';
   bool _isFeatureActive = true;
 
-  // 외부에서 음성 인식 결과를 받아 처리할 콜백 함수
   Function(String)? onResult;
 
-  // Getters
   VoiceState get state => _state;
   String get displayText => _displayText;
   bool get isFeatureActive => _isFeatureActive;
   bool get isProcessing => _state == VoiceState.listening || _state == VoiceState.processing || _state == VoiceState.speaking;
 
+  /// 서비스 생성자, 초기화 로직 호출
   VoiceInteractionService() {
     _initialize();
   }
 
+  /// TTS와 STT 엔진 초기화
   Future<void> _initialize() async {
-    // TTS 초기화
     await _flutterTts.setLanguage('ko-KR');
     await _flutterTts.setSpeechRate(1.0);
     await _flutterTts.awaitSpeakCompletion(true);
+    _setTtsHandlers();
 
+    await _speechToText.initialize();
+    notifyListeners();
+  }
+
+  /// TTS 이벤트 핸들러(시작, 종료) 설정
+  void _setTtsHandlers() {
     _flutterTts.setStartHandler(() => _updateState(VoiceState.speaking));
     _flutterTts.setCompletionHandler(() {
       if (_state == VoiceState.speaking) {
         _updateState(VoiceState.idle);
       }
     });
-
-    // STT 초기화
-    await _speechToText.initialize();
-    notifyListeners();
   }
 
+  /// 음성 서비스의 상태와 표시 텍스트를 업데이트하고 UI에 알림
   void _updateState(VoiceState newState, {String? text}) {
     _state = newState;
     if (text != null) {
@@ -54,7 +57,7 @@ class VoiceInteractionService with ChangeNotifier {
     notifyListeners();
   }
 
-  /// 음성 안내 후 바로 듣기를 시작합니다.
+  /// 텍스트를 읽어준 후 바로 음성 인식 시작
   Future<void> speakAndListen(String text) async {
     if (!_isFeatureActive || !_speechToText.isAvailable) return;
     _updateState(VoiceState.speaking, text: text);
@@ -62,14 +65,35 @@ class VoiceInteractionService with ChangeNotifier {
     startListening();
   }
 
-  /// 음성 안내만 합니다.
+  /// 텍스트를 음성으로 읽어줌
   Future<void> speak(String text) async {
     if (!_isFeatureActive) return;
     _updateState(VoiceState.speaking, text: text);
     await _flutterTts.speak(text);
   }
 
-  /// 음성 인식을 시작합니다.
+  /// 문자열을 한 글자씩 읽어준 후, 후속 텍스트를 읽고 음성 인식 시작
+  Future<void> speakCharacterByCharacter(
+      String characters, String followUpText) async {
+    if (!_isFeatureActive || !_speechToText.isAvailable) return;
+    
+    _updateState(VoiceState.speaking, text: '$characters $followUpText');
+
+    _flutterTts.setStartHandler(() {});
+    _flutterTts.setCompletionHandler(() {});
+
+    await _flutterTts.setSpeechRate(1.5); 
+    for (final char in characters.split('')) {
+      await _flutterTts.speak(char);
+    }
+    await _flutterTts.setSpeechRate(1.0); 
+    await _flutterTts.speak(followUpText);
+    _setTtsHandlers(); 
+
+    startListening();
+  }
+
+  /// 음성 인식(STT) 시작
   void startListening() {
     if (!_isFeatureActive || !_speechToText.isAvailable || _state == VoiceState.listening) return;
 
@@ -86,13 +110,13 @@ class VoiceInteractionService with ChangeNotifier {
     );
   }
 
-  /// 음성 인식을 중지합니다.
+  /// 음성 인식 중지
   void stopListening() {
     _speechToText.stop();
     _updateState(VoiceState.idle, text: '');
   }
 
-  /// 마이크 버튼 토글 로직
+  /// 음성 인식 시작/중지 토글
   void toggleListening() {
     if (_state == VoiceState.listening) {
       stopListening();
@@ -101,14 +125,14 @@ class VoiceInteractionService with ChangeNotifier {
     }
   }
 
-  /// 음성 기능을 비활성화합니다.
+  /// 음성 기능을 비활성화하고 작별 인사
   void deactivateFeature(String farewellMessage) {
     _isFeatureActive = false;
     speak(farewellMessage);
     _updateState(VoiceState.idle, text: '음성 기능이 비활성화되었습니다.');
   }
 
-  /// 사용자가 수동으로 UI를 조작했을 때 음성 기능을 비활성화하는 공통 메서드입니다.
+  /// 사용자가 수동으로 UI를 조작했을 때 음성 기능 비활성화
   void deactivateOnManualSelection() {
     if (_isFeatureActive) {
       _isFeatureActive = false;
@@ -116,7 +140,8 @@ class VoiceInteractionService with ChangeNotifier {
       _updateState(VoiceState.idle, text: '음성 기능이 비활성화되었습니다.');
     }
   }
-  /// LLM 처리 완료 후 서비스 상태를 업데이트합니다.
+
+  /// 음성 명령 처리가 완료되었음을 알리고 결과 텍스트 표시
   void completeProcessing(String resultText) {
     _updateState(VoiceState.idle, text: resultText);
   }

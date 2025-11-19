@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'package:smart_fuel/config/app_config.dart';
+import 'package:smart_fuel/theme/app_theme.dart';
 import 'screens/splash_screen.dart';
 
 Future<void> main() async {
@@ -25,20 +26,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SmartFuel',
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'NotoSansKR', // 한글 폰트 (옵션)
-        // 전체 배경을 연한 그레이 계열로 설정하고, 기본 색상은 차분한 톤으로 지정
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF607D8B), // blueGrey tone for primary actions
-          background: Color(0xFFF5F7FA),
-          surface: Colors.white,
-          onPrimary: Colors.white,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-        cardColor: Colors.white, dialogTheme: DialogThemeData(backgroundColor: Colors.white),
-      ),
+      title: 'Smart Refueler',
+      theme: AppTheme.getTheme(), // 중앙 관리되는 테마 적용
       home: const SplashScreen(),
       debugShowCheckedModeBanner: false,
     );

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/voice_interaction_service.dart';
 
-/// 음성 인식 상태를 표시하고 제어하는 재사용 가능한 위젯입니다.
+/// 음성 인식 상태를 표시하고 마이크 버튼을 제공하는 UI 컴포넌트
 class VoiceCommandBar extends StatelessWidget {
   final String initialText;
   final Color backgroundColor;
@@ -15,9 +15,9 @@ class VoiceCommandBar extends StatelessWidget {
     this.textColor = const Color(0xFF333D4B),
   }) : super(key: key);
 
+  /// 화면 UI 구성
   @override
   Widget build(BuildContext context) {
-    // Provider를 통해 VoiceInteractionService에 접근합니다.
     return Consumer<VoiceInteractionService>(
       builder: (context, voiceService, child) {
         final bool isMicOff = !voiceService.isFeatureActive || voiceService.isProcessing;

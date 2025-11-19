@@ -228,19 +228,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Toss-style Design Palette
-    const tossBlue = Color(0xFF3182F7);
-    const lightGray = Color(0xFFF2F4F6);
-    const darkGrayText = Color(0xFF333D4B);
-    const white = Colors.white;
-
     return Scaffold(
-      backgroundColor: white,
       appBar: AppBar(
-        title: const Text('로그인', style: TextStyle(color: darkGrayText)),
-        backgroundColor: white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: darkGrayText),
+        title: const Text('로그인'),
       ),
       body: SafeArea(
         child: Padding(

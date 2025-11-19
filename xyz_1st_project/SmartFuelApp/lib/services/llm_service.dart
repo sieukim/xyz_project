@@ -3,18 +3,16 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
-/// LLM API 관련 예외를 처리하기 위한 사용자 정의 클래스
+/// LLM API 통신 중 발생하는 예외
 class ApiException implements Exception {}
 
+/// Gemini LLM API와 통신하여 콘텐츠를 생성하고 결과를 파싱하는 서비스
 class LlmService {
   static String get _apiKey => AppConfig.geminiApiKey;
   static String get _modelEndpoint =>
       'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$_apiKey';
 
-  /// LLM API를 호출하여 주어진 프롬프트를 기반으로 콘텐츠를 생성합니다.
-  ///
-  /// [prompt]는 LLM에게 보낼 전체 지침입니다.
-  /// 반환값은 LLM이 생성한 JSON 응답을 파싱한 Map<String, dynamic>입니다.
+  /// 프롬프트를 전송하여 LLM으로부터 JSON 형식의 응답을 생성
   static Future<Map<String, dynamic>> generateContent(String prompt) async {
     final url = Uri.parse('$_modelEndpoint&alt=json');
 
@@ -26,8 +24,6 @@ class LlmService {
           {'parts': [{'text': prompt}]}
         ],
         'safetySettings': [
-          // 모든 안전 설정을 가장 낮은 수준으로 설정하여 차단 가능성을 최소화합니다.
-          // 실제 서비스에서는 적절한 수준으로 조절해야 합니다.
           {'category': 'HARM_CATEGORY_HARASSMENT', 'threshold': 'BLOCK_NONE'},
           {'category': 'HARM_CATEGORY_HATE_SPEECH', 'threshold': 'BLOCK_NONE'},
           {'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold': 'BLOCK_NONE'},
@@ -40,20 +36,19 @@ class LlmService {
     );
 
     if (response.statusCode != 200) {
-      throw ApiException(); // 서버 오류 시 ApiException 발생
+      throw ApiException(); 
     }
 
     final responseBody = jsonDecode(utf8.decode(response.bodyBytes));
 
     if (responseBody['candidates'] == null || (responseBody['candidates'] as List).isEmpty) {
       final error = responseBody['error'];
-      if (error != null) throw ApiException(); // API 오류 시 ApiException 발생
+      if (error != null) throw ApiException(); 
       throw Exception('API로부터 유효한 응답을 받지 못했습니다.');
     }
 
     final content = responseBody['candidates'][0]['content']['parts'][0]['text'] as String;
     
-    // LLM 응답에서 JSON 객체만 추출 (마크다운, 일반 텍스트 등 불필요한 부분 제거)
     final jsonRegex = RegExp(r'\{[\s\S]*\}');
     final match = jsonRegex.firstMatch(content);
 
@@ -65,11 +60,7 @@ class LlmService {
     return jsonDecode(match.group(0)!) as Map<String, dynamic>;
   }
 
-  /// LLM API를 호출하여 주어진 프롬프트를 기반으로 텍스트 콘텐츠만 생성합니다.
-  ///
-  /// JSON 파싱을 시도하지 않고 순수 텍스트를 반환합니다.
-  /// [prompt]는 LLM에게 보낼 전체 지침입니다.
-  /// 반환값은 LLM이 생성한 String입니다.
+  /// 프롬프트를 전송하여 LLM으로부터 텍스트 형식의 응답을 생성
   static Future<String> generateTextOnly(String prompt) async {
     final url = Uri.parse('$_modelEndpoint&alt=json');
 

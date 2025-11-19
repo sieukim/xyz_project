@@ -2,19 +2,18 @@ import 'package:flutter/foundation.dart';
 import 'package:smart_fuel/services/llm_service.dart';
 import 'package:smart_fuel/services/voice_interaction_service.dart';
 
-/// 대화가 이루어지는 화면의 종류를 정의합니다.
+/// 대화가 이루어지는 화면의 종류 정의
 enum ConversationScreen {
   fuelSelection,
   payment,
   fuelProgress,
 }
 
-/// 대화의 결과로 UI가 수행해야 할 작업을 정의하는 클래스입니다.
+/// LLM의 분석 결과에 따라 수행할 동작(음성 답변, 화면 전환 등)을 정의
 class ConversationAction {
-  final String? speakText; // AI가 사용자에게 말할 내용
-  final bool shouldListenNext; // 말한 뒤에 다시 사용자의 입력을 기다릴지 여부
-  final Map<String, dynamic> stateUpdate; // 화면의 상태를 변경하기 위한 데이터
-
+  final String? speakText; 
+  final bool shouldListenNext; 
+  final Map<String, dynamic> stateUpdate; 
   ConversationAction({
     this.speakText,
     this.shouldListenNext = false,
@@ -22,27 +21,22 @@ class ConversationAction {
   });
 }
 
-/// 대화 시나리오를 중앙에서 관리하는 서비스 클래스입니다.
+/// 사용자 발화를 분석하고, 현재 화면과 맥락에 맞는 대화 흐름을 관리하는 서비스
 class ConversationManagerService {
-  /// 음성 명령을 처리하고 그에 따른 UI 행동을 반환합니다.
-  ///
-  /// [command]는 사용자의 음성 인식 결과입니다.
-  /// [screen]은 현재 대화가 이루어지는 화면의 종류입니다.
-  /// [context]는 화면의 현재 상태 데이터입니다. (예: 주유 진행률, 선택된 카드 정보 등)
+  /// 음성 명령을 받아 화면과 맥락에 맞게 처리하고 액션을 반환
   Future<ConversationAction> processVoiceCommand({
     required String command,
     required ConversationScreen screen,
     Map<String, dynamic> context = const {},
   }) async {
     if (command.isEmpty) {
-      return ConversationAction(); // 아무것도 하지 않음
+      return ConversationAction(); 
     }
 
     try {
       final prompt = _buildPrompt(screen, command, context);
       final result = await LlmService.generateContent(prompt);
 
-      // 공통 의도 처리 (예: 음성 도움 거절)
       if (result['intent'] == 'no_help_needed') {
         return ConversationAction(
           speakText: result['response'] as String? ?? "네, 직접 조작해주세요.",
@@ -50,7 +44,6 @@ class ConversationManagerService {
         );
       }
 
-      // 각 화면별 특화 로직 처리
       switch (screen) {
         case ConversationScreen.fuelSelection:
           return _handleFuelSelection(result, context);
@@ -74,7 +67,7 @@ class ConversationManagerService {
     }
   }
 
-  /// 화면 종류에 맞는 LLM 프롬프트를 생성합니다.
+  /// 화면과 맥락에 맞는 LLM 프롬프트를 생성
   String _buildPrompt(ConversationScreen screen, String command, Map<String, dynamic> context) {
     switch (screen) {
       case ConversationScreen.fuelSelection:
@@ -113,13 +106,11 @@ class ConversationManagerService {
     }
   }
 
-  // --- 각 화면별 응답 처리 로직 ---
-
+  /// 주유 설정 화면의 대화 로직 처리
   ConversationAction _handleFuelSelection(Map<String, dynamic> result, Map<String, dynamic> context) {
     final intent = result['intent'] as String?;
     final currentContext = context['conversationContext'];
 
-    // 최종 확인 단계에서의 응답 처리
     if (currentContext == 'awaitingFinalConfirmation') {
       if (intent == 'confirmation_positive') {
         return ConversationAction(stateUpdate: {'navigate_to_payment': true});
@@ -132,7 +123,6 @@ class ConversationManagerService {
       }
     }
 
-    // 정보가 모두 채워졌는지 확인
     final fuelType = result['fuelType'] as String? ?? context['fuelType'];
     final amount = result['amount'] as int? ?? context['amount'];
     final bool isInfoComplete = (fuelType != null) && (amount != null);
@@ -149,7 +139,6 @@ class ConversationManagerService {
         },
       );
     } else {
-      // 부족한 정보 요청
       String question;
       if (fuelType == null) {
         question = '유종을 말씀해주세요.';
@@ -164,10 +153,10 @@ class ConversationManagerService {
     }
   }
 
+  /// 결제 화면의 대화 로직 처리
   ConversationAction _handlePayment(Map<String, dynamic> result, Map<String, dynamic> context) {
     final confirmation = result['confirmation'] as String?;
     final isAwaiting = context['isAwaitingConfirmation'] == true;
-
     if (isAwaiting && confirmation == 'positive') {
       return ConversationAction(stateUpdate: {'perform_payment': true});
     }
@@ -191,6 +180,7 @@ class ConversationManagerService {
     }
   }
 
+  /// 주유 진행 화면의 대화 로직 처리
   ConversationAction _handleFuelProgress(Map<String, dynamic> result) {
     final responseText = result['response'] as String?;
     if (responseText == null || responseText.isEmpty) {

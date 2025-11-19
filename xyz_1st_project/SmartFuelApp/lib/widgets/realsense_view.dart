@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+/// RealSense 카메라 스트리밍 영상을 WebView로 보여주는 위젯
 class RealSenseViewWidget extends StatefulWidget {
-  // ✅ 1. 하드코딩된 IP 대신 파라미터로 받도록 변경
   final String serverIp;
-  final String streamPort; // Realsense 스트리머 포트
+  final String streamPort; 
 
-  // ✅ 2. 생성자에서 serverIp를 필수로 받음
   const RealSenseViewWidget({Key? key, required this.serverIp, required this.streamPort}) : super(key: key);
 
   @override
@@ -17,6 +16,7 @@ class _RealSenseViewWidgetState extends State<RealSenseViewWidget> {
   late final WebViewController _controller;
   bool _hasError = false;
 
+  /// 위젯 초기화 시 WebView 컨트롤러 설정
   @override
   void initState() {
     super.initState();
@@ -27,6 +27,7 @@ class _RealSenseViewWidgetState extends State<RealSenseViewWidget> {
       ..loadRequest(Uri.parse(fullUrl));
   }
 
+  /// 화면 UI 구성
   @override
   Widget build(BuildContext context) {
      if (_hasError) {
