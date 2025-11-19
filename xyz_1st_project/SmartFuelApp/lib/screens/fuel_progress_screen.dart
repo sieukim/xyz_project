@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:http/http.dart' as http;
-
+import 'package:provider/provider.dart';
+import 'package:smart_fuel/services/conversation_manager_service.dart';
+import 'package:smart_fuel/services/voice_interaction_service.dart';
 import 'package:smart_fuel/config/app_config.dart';
 import 'package:smart_fuel/widgets/realsense_view.dart';
 import 'package:smart_fuel/services/llm_service.dart';
+import 'package:smart_fuel/widgets/voice_command_bar.dart';
 import 'package:smart_fuel/widgets/webcam_view.dart';
 import 'package:smart_fuel/screens/fuel_selection_screen.dart';
 
@@ -21,18 +22,36 @@ class FuelProgressScreen extends StatefulWidget {
       : super(key: key);
 
   @override
-  State<FuelProgressScreen> createState() => _FuelProgressScreenState();
+  State<FuelProgressScreen> createState() => _FuelProgressScreenStateWrapper();
 }
 
-class _FuelProgressScreenState extends State<FuelProgressScreen>
-    with SingleTickerProviderStateMixin {
-  final FlutterTts _flutterTts = FlutterTts();
-  final SpeechToText _speechToText = SpeechToText();
-  bool _isListening = false;
-  String _voiceCommandStatusText = '주유 중 궁금한 점을 말씀해주세요.';
-  bool _isSpeaking = false;
+/// ChangeNotifierProvider를 사용하기 위한 Wrapper 클래스
+class _FuelProgressScreenStateWrapper extends State<FuelProgressScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => VoiceInteractionService(),
+      child: _FuelProgressScreenContent(
+        orderId: widget.orderId,
+        rosBaseUrl: widget.rosBaseUrl,
+      ),
+    );
+  }
+}
 
-  bool _voiceFeatureActive = true; // 음성 기능 활성화 여부
+class _FuelProgressScreenContent extends StatefulWidget {
+  final String orderId;
+  final String rosBaseUrl;
+
+  const _FuelProgressScreenContent({required this.orderId, required this.rosBaseUrl});
+
+  @override
+  State<_FuelProgressScreenContent> createState() => _FuelProgressScreenState();
+}
+
+class _FuelProgressScreenState extends State<_FuelProgressScreenContent>
+    with SingleTickerProviderStateMixin {
+  late VoiceInteractionService _voiceService;
   Timer? _timer;
   String _status = '대기 중';
   int _progress = 0;
@@ -48,162 +67,59 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
   void initState() {
     super.initState();
     // 탭 컨트롤러 초기화
+    _voiceService = Provider.of<VoiceInteractionService>(context, listen: false);
     _tabController = TabController(length: 2, vsync: this);
     _initializeScreen();
   }
 
   Future<void> _initializeScreen() async {
-    await _initTts();
-    await _initStt();
+    _voiceService.onResult = _processVoiceCommand;
     _extractIpAndStartPolling();
     // 화면 빌드 후 초기 대화 시작
     WidgetsBinding.instance.addPostFrameCallback((_) => _startInitialConversation());
   }
 
-  Future<void> _initTts() async {
-    await _flutterTts.setLanguage('ko-KR');
-    await _flutterTts.setSpeechRate(1.0);
-    await _flutterTts.awaitSpeakCompletion(true);
-  }
-
   Future<void> _startInitialConversation() async {
     if (!mounted) return;
-    await _flutterTts.speak("주유중입니다.");
-    await _flutterTts.speak("도움이 필요하신게 있으신가요?");
-    if (mounted) {
-      setState(() => _voiceCommandStatusText = '도움이 필요하신게 있으신가요?');
-      _startListening();
-    }
-  }
-
-  Future<void> _initStt() async {
-    await _speechToText.initialize(
-      onError: (error) {
-        debugPrint('STT Error: ${error.errorMsg}');
-        if (mounted) {
-          setState(() {
-            _voiceCommandStatusText = '음성 인식 오류가 발생했습니다.';
-            _isListening = false;
-          });
-        }
-      },
-      onStatus: (status) {}, // UI 깜빡임 방지를 위해 onStatus에서 상태 변경 안 함
-    );
-  }
-
-  void _toggleListening() {
-    if (!_speechToText.isAvailable || _completed || _isFinishingSoon || !_voiceFeatureActive) return;
-    if (_isListening) {
-      _stopListening();
-    } else {
-      _startListening();
-    }
-  }
-
-  void _startListening() {
-    if (!_speechToText.isAvailable) return;
-    setState(() {
-      _isListening = true;
-      _voiceCommandStatusText = '듣는 중...';
-    });
-    _speechToText.listen(
-      onResult: (result) {
-        if (result.finalResult) {
-          _processVoiceCommand(result.recognizedWords);
-        }
-      },
-      localeId: 'ko_KR',
-      listenFor: const Duration(seconds: 3), // 3초로 수정
-    );
-  }
-
-  void _stopListening() {
-    _speechToText.stop();
-    if (mounted) setState(() => _isListening = false);
+    await _voiceService.speak("주유중입니다.");
+    _voiceService.speakAndListen("도움이 필요하신게 있으신가요?");
   }
 
   /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
-  Future<void> _speakAndListen(String text) async {
-    if (!mounted) return;
-    setState(() => _voiceCommandStatusText = text); // 화면에 현재 상태 표시
-    await _flutterTts.speak(text);
-    if (mounted) _startListening();
-  }
 
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
 
-    setState(() {
-      _voiceCommandStatusText = '분석 중...';
-      _isListening = false;
-    });
-
     final totalDuration = AppConfig.totalFuelingSeconds;
     final remainingSeconds = (totalDuration * (100 - _progress) / 100.0).round();
 
-    final prompt = """
-    당신은 주유 중인 운전자를 돕는 친절한 AI 비서입니다. 사용자의 질문에 대해 JSON 형식으로 답변을 생성해주세요.
+    final manager = ConversationManagerService();
+    final action = await manager.processVoiceCommand(
+      command: command,
+      screen: ConversationScreen.fuelProgress,
+      context: {
+        'progress': _progress,
+        'remainingSeconds': remainingSeconds,
+      },
+    );
 
-    ### 현재 주유 상태 (내부 정보):
-    - 진행률: $_progress%
-    - 남은 시간: $remainingSeconds초
+    _handleConversationAction(action);
+  }
 
-    ### 지침:
-    1.  사용자의 질문 의도를 파악하세요.
-    2.  '진행률'이나 '남은 시간'에 대한 질문이라면, 위 내부 정보를 활용하여 자연스러운 한 문장으로 답변을 생성하세요.
-    3.  사용자가 도움이 필요 없다고 말하면(예: "아니", "없어", "괜찮아"), 'intent' 필드에 'no_help_needed'를 포함시키세요.
-    4.  그 외 모든 질문(날씨, 농담, 일반 상식 등)에 대해서도 사용자를 즐겁게 할 수 있는 간결하고 친절한 답변을 생성하세요.
-    5.  생성된 답변은 'response' 필드에 담아 JSON으로 반환하세요.
+  void _handleConversationAction(ConversationAction action) {
+    if (!mounted) return;
 
-    ### 예시:
-    - 사용자 질문: "얼마나 됐어?"
-      -> {"response": "네, 현재 $_progress% 진행되었습니다. 거의 다 되어가네요!"}
-    - 사용자 질문: "아니 괜찮아"
-      -> {"intent": "no_help_needed", "response": "네, 알겠습니다. 편하게 기다려주세요."}
-    - 사용자 질문: "오늘 날씨 어때?"
-      -> {"response": "오늘 날씨는 화창해서 주유 후에 드라이브하기 딱 좋은 날씨입니다!"}
-    - 사용자 질문: "재미있는 얘기 해줘."
-      -> {"response": "기름을 너무 많이 먹는 공룡 이름은 뭘까요? 바로 '기름이모자우루스'입니다!"}
+    if (action.stateUpdate['deactivate_voice'] == true) {
+      _voiceService.deactivateFeature(action.speakText ?? "네, 알겠습니다.");
+      return;
+    }
 
-    ### 사용자 질문:
-    "$command"
-    """;
-
- try {
-      final result = await LlmService.generateContent(prompt);
-      final responseText = result['response'] as String?;
-      final intent = result['intent'] as String?;
-
-      if (intent == 'no_help_needed') {
-        setState(() => _voiceFeatureActive = false);
+    if (action.speakText != null && _voiceService.isFeatureActive) {
+      if (action.shouldListenNext) {
+        _voiceService.speakAndListen(action.speakText!);
+      } else {
+        _voiceService.speak(action.speakText!);
       }
-      
-      if (responseText == null || responseText.isEmpty) {
-        throw Exception('LLM이 유효한 답변을 생성하지 못했습니다.');
-      }
-
-      // 1. 화면의 텍스트를 먼저 업데이트합니다.
-      if (mounted) {
-        setState(() {
-          _voiceCommandStatusText = responseText;
-        });
-      }
-      // 2. UI가 실제로 렌더링된 다음 TTS 실행
-      await _flutterTts.speak(responseText);
-
-      // 3. 사용자가 대화를 거절하지 않았다면, 다시 듣기를 시작하여 대화를 이어갑니다.
-      if (mounted && _voiceFeatureActive) {
-        _startListening();
-      }
-
-    } on ApiException catch (e) {
-      debugPrint('LLM API 오류: $e');
-      const errorMessage = '서버에 일시적인 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
-      await _speakAndListen(errorMessage);
-    } catch (e) {
-      debugPrint('LLM 의도 분석 오류: $e');
-      const errorMessage = '죄송해요, 잘 이해하지 못했어요. 다시 말씀해주시겠어요?';
-      await _speakAndListen(errorMessage);
     }
   }
 
@@ -228,13 +144,8 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
   void dispose() {
     _timer?.cancel();
     _tabController?.dispose();
-    _countdownTimer?.cancel();
-    _flutterTts.stop();
     super.dispose();
   }
-
-  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
-  bool get _isVoiceProcessing => _isListening || _voiceCommandStatusText == '분석 중...' || _isSpeaking;
 
   Future<void> _fetchStatus() async {
     if (_serverIp == null) {
@@ -281,7 +192,7 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
       _progress = 100;
     });
 
-    await _flutterTts.speak("주유를 완료했습니다. 안녕히 가세요.");
+    await _voiceService.speak("주유를 완료했습니다. 안녕히 가세요.");
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_countdown > 1) {
@@ -409,31 +320,10 @@ class _FuelProgressScreenState extends State<FuelProgressScreen>
             ),
             const SizedBox(height: 24),
             if (!_completed)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: lightGrayBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? Icons.mic_off : Icons.mic,
-                        color: !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? Colors.grey : darkGrayText,
-                      ),
-                      onPressed: !_voiceFeatureActive || _isVoiceProcessing || _isFinishingSoon ? null : _toggleListening,
-                      tooltip: '궁금한 점을 질문하세요',
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _voiceCommandStatusText,
-                        style: TextStyle(fontSize: 16, color: _isFinishingSoon ? Colors.grey : darkGrayText, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
+              VoiceCommandBar(
+                initialText: '주유 중 궁금한 점을 말씀해주세요.',
+                backgroundColor: lightGrayBg,
+                textColor: darkGrayText,
               ),
             if (_completed) const Spacer(),
           ],

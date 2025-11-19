@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'package:provider/provider.dart';
 import 'fuel_progress_screen.dart';
 import 'dart:math';
+import '../widgets/voice_command_bar.dart';
+import '../services/voice_interaction_service.dart';
 import '../config/app_config.dart';
 import '../services/llm_service.dart';
 
@@ -16,104 +17,61 @@ class PaymentScreen extends StatefulWidget {
       : super(key: key);
 
   @override
-  State<PaymentScreen> createState() => _PaymentScreenState();
+  State<PaymentScreen> createState() => _PaymentScreenStateWrapper();
 }
 
-class _PaymentScreenState extends State<PaymentScreen> {
-  final FlutterTts _flutterTts = FlutterTts();
-  final SpeechToText _speechToText = SpeechToText();
-  bool _isListening = false;
-  String _recognizedWords = '';
+/// ChangeNotifierProvider를 사용하기 위한 Wrapper 클래스
+class _PaymentScreenStateWrapper extends State<PaymentScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => VoiceInteractionService(),
+      child: _PaymentScreenContent(
+        fuelType: widget.fuelType,
+        amount: widget.amount,
+      ),
+    );
+  }
+}
+
+class _PaymentScreenContent extends StatefulWidget {
+  final String fuelType;
+  final int amount;
+
+  const _PaymentScreenContent({required this.fuelType, required this.amount});
+
+  @override
+  State<_PaymentScreenContent> createState() => _PaymentScreenState();
+}
+
+class _PaymentScreenState extends State<_PaymentScreenContent> {
   bool isProcessing = false;
   String _selectedPaymentMethod = '신용카드';
   int _selectedCardIndex = 0;
   final List<String> _cardNumbers = [];
   bool _isAwaitingConfirmation = false; // 결제 확인 대기 상태
+  late VoiceInteractionService _voiceService;
 
-  bool _voiceFeatureActive = true; // 음성 기능 활성화 여부
   @override
   void initState() {
     super.initState();
-    _initTts();
-    _initStt().then((_) {
-      // STT 초기화 후, 화면이 완전히 빌드된 다음 음성 안내 및 인식 시작
-      WidgetsBinding.instance.addPostFrameCallback((_) => _speakAndListen('결제 수단을 말씀해주세요.'));
-    });
+    _voiceService = Provider.of<VoiceInteractionService>(context, listen: false);
+    _voiceService.onResult = _processVoiceCommand;
 
     for (int i = 0; i < 5; i++) {
       _cardNumbers.add((Random().nextInt(9000) + 1000).toString());
     }
-  }
 
-  Future<void> _initTts() async {
-    await _flutterTts.setLanguage('ko-KR');
-    await _flutterTts.setSpeechRate(1.0);
-  }
-
-  Future<void> _initStt() async {
-    await _speechToText.initialize(
-      onError: (error) {
-        debugPrint('STT Error: ${error.errorMsg}');
-        if (mounted) {
-          setState(() {
-            _recognizedWords = '음성 인식 오류가 발생했습니다.';
-            _isListening = false;
-          });
-        }
-      },
-      onStatus: (status) {}, // UI 깜빡임 방지를 위해 onStatus에서 상태 변경 안 함
-    );
+    // 화면 빌드 후 음성 안내 시작
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _voiceService.speakAndListen('결제 수단을 말씀해주세요.');
+    });
   }
 
   /// TTS로 문장을 말하고, 끝나면 바로 음성 인식을 시작하는 헬퍼 함수
-  Future<void> _speakAndListen(String text) async {
-    if (!mounted) return;
-    setState(() => _recognizedWords = text); // 화면에 현재 상태 표시
-    await _flutterTts.speak(text);
-    if (mounted) _startListening();
-  }
-
-  void _toggleListening() {
-    if (!_speechToText.isAvailable) return;
-    if (_isListening) {
-      _stopListening();
-    } else {
-      _startListening();
-    }
-  }
-
-  void _startListening() {
-    if (!_speechToText.isAvailable) return;
-    setState(() {
-      _isListening = true;
-      _recognizedWords = '듣는 중...';
-    });
-      _speechToText.listen(
-        onResult: (result) {
-          if (result.finalResult) {
-            _processVoiceCommand(result.recognizedWords);
-          }
-        },
-        localeId: 'ko_KR',
-        listenFor: const Duration(seconds: 3), // 3초로 설정
-      );
-    }
-
-  void _stopListening() {
-    _speechToText.stop();
-    if (!mounted) return;
-    setState(() {
-      _isListening = false;
-      _recognizedWords = '';
-    });
-  }
 
   Future<void> _processVoiceCommand(String command) async {
     if (command.isEmpty) return;
-    setState(() {
-      _isListening = false;
-      _recognizedWords = '분석 중...';
-    });
 
     final prompt = """
     사용자의 결제 요청에서 결제 수단과 결제 실행 여부를 추출해줘.
@@ -147,12 +105,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       // 0. 사용자가 음성 도움을 거절한 경우
       if (intent == 'no_help_needed') {
-        setState(() {
-          _voiceFeatureActive = false;
-          // 상태 텍스트를 변경하여 '분석 중...'에서 벗어납니다.
-          _recognizedWords = '음성 기능이 비활성화되었습니다.';
-        });
-        await _flutterTts.speak("네, 직접 선택해주세요.");
+        _voiceService.deactivateFeature("네, 직접 선택해주세요.");
         return; // ★★★ 함수를 즉시 종료합니다.
       }
       // 1. 결제 확인 대기 상태에서 긍정 답변을 받았을 경우
@@ -196,7 +149,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         } else {
           _selectedCardIndex = -1;
         }
-        _recognizedWords = displayText;
+        _voiceService.completeProcessing(displayText);
       });
 
       if (shouldPay) {
@@ -206,26 +159,21 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _isAwaitingConfirmation = true;
         final confirmationQuestion =
             '${_selectedPaymentMethod == '신용카드' ? '신용카드 ${_selectedCardIndex + 1}' : _selectedPaymentMethod}(으)로 결제할까요?';
-        setState(() => _recognizedWords = confirmationQuestion);
-        await _flutterTts.speak(confirmationQuestion);
-        if (mounted) _startListening();
+        _voiceService.speakAndListen(confirmationQuestion);
       }
     } on ApiException catch (e) {
       debugPrint('LLM API 오류: $e');
       const errorMessage = '서버에 일시적인 문제가 발생했어요. 잠시 후 다시 시도해주세요.';
-      if (mounted) await _speakAndListen(errorMessage);
+      if (mounted) _voiceService.speakAndListen(errorMessage);
     } catch (e) {
       debugPrint('LLM 결제수단 분석 오류: $e');
       const errorMessage = '죄송해요, 잘 이해하지 못했어요. 다시 말씀해주시겠어요?';
-      if (mounted) await _speakAndListen(errorMessage);
+      if (mounted) _voiceService.speakAndListen(errorMessage);
     }
   }
 
-  /// 음성 인식 및 분석이 진행 중인지 여부를 반환합니다.
-  bool get _isVoiceProcessing => _isListening || _recognizedWords == '분석 중...';
-
   Future<void> simulatePayment() async {
-    await _flutterTts.speak("결제를 시작합니다.");
+    await _voiceService.speak("결제를 시작합니다.");
 
     setState(() => isProcessing = true);
 
@@ -252,7 +200,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           .timeout(const Duration(seconds: 8));
 
       if (res.statusCode == 200) {
-        await _flutterTts.speak("결제를 완료했습니다.");
+        await _voiceService.speak("결제를 완료했습니다.");
 
         String returnedOrderId = orderId;
         try {
@@ -343,12 +291,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
         scrollDirection: Axis.horizontal,
         itemCount: 5,
         itemBuilder: (context, index) {
+          final voiceService = Provider.of<VoiceInteractionService>(context);
           return GestureDetector(
-            onTap: _isVoiceProcessing ? null : () {
+            onTap: voiceService.isProcessing ? null : () {
               setState(() {
                 _selectedCardIndex = index;
                 _selectedPaymentMethod = '신용카드';
-                if (_voiceFeatureActive) _voiceFeatureActive = false;
+                voiceService.deactivateOnManualSelection();
               });
             },
             child: _buildCardItem(index),
@@ -371,14 +320,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
         final bgColor = entry.value['bg']!;
         final textColor = entry.value['text']!;
         final isSelected = _selectedPaymentMethod == methodName;
+        final voiceService = Provider.of<VoiceInteractionService>(context);
 
         return Expanded(
           child: GestureDetector(
-            onTap: _isVoiceProcessing ? null : () {
+            onTap: voiceService.isProcessing ? null : () {
               setState(() {
                 _selectedPaymentMethod = methodName;
                 _selectedCardIndex = -1; // Deselect card
-                if (_voiceFeatureActive) _voiceFeatureActive = false;
+                voiceService.deactivateOnManualSelection();
               });
             },
             child: AnimatedContainer(
@@ -450,32 +400,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF2F4F6),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: Icon(
-                          !_voiceFeatureActive || _isVoiceProcessing ? Icons.mic_off : Icons.mic,
-                          color: !_voiceFeatureActive || _isVoiceProcessing ? Colors.grey : darkGrayText,
-                          ),
-                        onPressed:
-                            !_voiceFeatureActive || isProcessing || _isVoiceProcessing ? null : _toggleListening,
-                          tooltip: '음성으로 결제수단 선택',
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _recognizedWords.isNotEmpty ? _recognizedWords : '결제 수단을 말씀해주세요.',
-                            style: const TextStyle(fontSize: 16, color: darkGrayText, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
+                  VoiceCommandBar(
+                    initialText: '결제 수단을 말씀해주세요.',
+                    backgroundColor: Color(0xFFF2F4F6),
+                    textColor: darkGrayText,
                   ),
                   const SizedBox(height: 40),
                   const Text( // '카드 선택' 제목
@@ -496,8 +424,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(20.0),
-        child: ElevatedButton(
-          onPressed: isProcessing || _isVoiceProcessing ? null : simulatePayment,
+        child: Consumer<VoiceInteractionService>(
+          builder: (context, voiceService, child) => ElevatedButton(
+          onPressed: isProcessing || voiceService.isProcessing ? null : simulatePayment,
           style: ElevatedButton.styleFrom(
             backgroundColor: tossBlue,
             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -511,6 +440,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             '결제하기',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
           ),
+        ),
         ),
       ),
     );
