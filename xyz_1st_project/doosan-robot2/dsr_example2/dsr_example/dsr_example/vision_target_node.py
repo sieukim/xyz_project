@@ -24,12 +24,16 @@ class VisionTargetNode(Node):
         package_share = get_package_share_directory("dsr_example")
         # ✅ 각각 다른 모델 파일 경로 설정
         webcam_model_path = os.path.join(package_share, "weights", "car_detect.pt")
-        realsense_model_path = os.path.join(package_share, "weights", "nozzel_detect.pt")
+        realsense_model_path = os.path.join(package_share, "weights", "new_best_model.pt")
 
         # ✅ 모델 개별 로드
         self.model_webcam = YOLO(webcam_model_path)
         self.model_realsense = YOLO(realsense_model_path)
         
+        # ✅ TensorRT or PyTorch 자동 인식
+        # self.model_webcam = self._load_yolo_model(webcam_model_path)
+        # self.model_realsense = self._load_yolo_model(webcam_model_path)
+
         # model_path = os.path.join(package_share, "weights", "nozzel_detect.pt")
         # self.model = YOLO(model_path)
 
@@ -51,6 +55,30 @@ class VisionTargetNode(Node):
         # ✅ 카메라 intrinsic (640x480 기준, 필요시 캘리브레이션)
         self.fx, self.fy = 615.0, 615.0
         self.cx, self.cy = 320.0, 240.0
+
+        # ✅ warmup (TensorRT cold start 방지)
+        # dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+        # self.model_realsense.predict(dummy, verbose=False)
+
+        self.get_logger().info("✅ YOLO TensorRT 지원 버전 가동 중")
+
+    def _load_yolo_model(self, path: str):
+        """TensorRT(.engine) → YOLO 자동 로드"""
+        trt_path = path.replace('.pt', '.engine')
+
+        if os.path.exists(trt_path):
+            self.get_logger().info(f"⚡ TensorRT 모델 로드: {trt_path}")
+            model = YOLO(trt_path)
+        else:
+            self.get_logger().info(f"🧠 PyTorch 모델 로드: {path}")
+            model = YOLO(path)
+
+        try:
+            model.to('cuda').half() # FP16 사용
+        except Exception as e:
+            self.get_logger().warn(f"GPU FP16 모드 실패, CPU fallback: {e}")
+
+        return model
 
     def depth_callback(self, msg):
         """RealSense depth 이미지 최신 프레임 저장"""
@@ -138,6 +166,28 @@ class VisionTargetNode(Node):
             self.pub_realsense_yolo.publish(String(data=detections_json))
         else:
             self.get_logger().warn(f"⚠️ Unknown camera source: {self.camera_source}")   
+
+    def overlay_heatmap(base_img, bbox, intensity=0.8, radius=60):
+        """YOLO bbox 중심을 기준으로 heatmap 오버레이"""
+        overlay = base_img.copy()
+        heat = np.zeros_like(base_img, dtype=np.float32)
+        x1, y1, x2, y2 = bbox
+        cx, cy = int((x1+x2)/2), int((y1+y2)/2)
+
+        # 🔥 중심 기준 가우시안 생성
+        for y in range(max(0, cy-radius), min(base_img.shape[0], cy+radius)):
+            for x in range(max(0, cx-radius), min(base_img.shape[1], cx+radius)):
+                d = np.sqrt((x-cx)**2 + (y-cy)**2)
+                val = np.exp(- (d**2) / (2*(radius/2)**2))
+                heat[y, x, 1] = val  # G 채널 강화 (시각적 집중)
+
+        # normalize & 컬러맵 적용
+        heatmap = (255 * heat / np.max(heat)).astype(np.uint8)
+        heatmap = cv2.applyColorMap(heatmap[:, :, 1], cv2.COLORMAP_JET)
+
+        # 오버레이 합성
+        cv2.addWeighted(heatmap, intensity, overlay, 1 - intensity, 0, overlay)
+        return overlay
 
 def main(args=None):
     rclpy.init(args=args)

@@ -17,7 +17,7 @@ class YoloOcrNode(Node):
         super().__init__("yolo_ocr_node")
 
         # ===== ROS2 파라미터 =====
-        self.declare_parameter("model_path", "/home/sieun/Downloads/xyz_project/xyz_1st_project/doosan-robot2/dsr_example2/dsr_example/dsr_example/weights/Vehicle_number.pt")
+        self.declare_parameter("model_path", "/home/sieun/Downloads/xyz_project/xyz_1st_project/doosan-robot2/dsr_example2/dsr_example/dsr_example/weights/vehicle_number.pt")
         self.declare_parameter("capture_interval_sec", 5.0)
         self.declare_parameter("lock_duration_sec", 5.0)
         self.declare_parameter("plate_class_id", -1)                  # -1이면 필터 안 함

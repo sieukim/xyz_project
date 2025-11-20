@@ -31,7 +31,6 @@ def generate_launch_description():
             name='realsense_manager_ros',
             output='screen'
         ),
-
         # === VISION + MOTION ===
         Node(
             package='dsr_example',
@@ -45,12 +44,4 @@ def generate_launch_description():
             name='motion_controller',
             output='screen'
         ),
-
-        # === FASTAPI Bridge ===
-        Node(
-            package='dsr_example',
-            executable='fuel_listener_node',
-            name='fuel_listener_node',
-            output='screen'
-        )
     ])

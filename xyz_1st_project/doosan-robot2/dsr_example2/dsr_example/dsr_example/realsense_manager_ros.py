@@ -5,6 +5,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import pyrealsense2 as rs
 import numpy as np
+from sensor_msgs.msg import CameraInfo
 
 class RealSenseManagerROS(Node):
     def __init__(self):
@@ -20,6 +21,16 @@ class RealSenseManagerROS(Node):
         align_to = rs.stream.color
         self.align = rs.align(align_to)
         
+        info = CameraInfo()
+        info.header.frame_id = "camera_link"
+        info.height = 480
+        info.width = 640
+        info.k = [600.0, 0.0, 320.0,
+                0.0, 600.0, 240.0,
+                0.0, 0.0, 1.0]
+        pub_info = self.create_publisher(CameraInfo, "/fuel/camera_info", 10)
+        pub_info.publish(info)
+
         self.publisher_color = self.create_publisher(Image, '/fuel/realsense_color', 10)
         self.publisher_depth = self.create_publisher(Image, '/fuel/realsense_depth', 10)
 
