@@ -221,11 +221,10 @@ class _PaymentScreenState extends State<_PaymentScreenContent> {
         throw Exception('서버 오류 (${res.statusCode})');
       }
     } catch (e) {
+      setState(() => isProcessing = false); 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('결제 실패: $e')),
       );
-    } finally {
-      setState(() => isProcessing = false);
     }
   }
 
