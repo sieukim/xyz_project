@@ -16,7 +16,7 @@ class ApiException implements Exception {
 class LlmService {
   static String get _apiKey => AppConfig.geminiApiKey;
   static String get _modelEndpoint =>
-      'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$_apiKey';
+      'https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=$_apiKey';
 
   /// 프롬프트를 전송하여 LLM으로부터 JSON 형식의 응답을 생성
   static Future<Map<String, dynamic>> generateContent(String prompt) async {

@@ -30,7 +30,7 @@ class VoiceInteractionService with ChangeNotifier {
   /// TTS와 STT 엔진 초기화
   Future<void> _initialize() async {
     await _flutterTts.setLanguage('ko-KR');
-    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setSpeechRate(1);
     await _flutterTts.awaitSpeakCompletion(true);
     _setTtsHandlers();
 
@@ -82,11 +82,11 @@ class VoiceInteractionService with ChangeNotifier {
     _flutterTts.setStartHandler(() {});
     _flutterTts.setCompletionHandler(() {});
 
-    await _flutterTts.setSpeechRate(1); 
+    await _flutterTts.setSpeechRate(1.5); 
     for (final char in characters.split('')) {
       await _flutterTts.speak(char);
     }
-    await _flutterTts.setSpeechRate(0.5); 
+    await _flutterTts.setSpeechRate(1); 
     await _flutterTts.speak(followUpText);
     _setTtsHandlers(); 
 
